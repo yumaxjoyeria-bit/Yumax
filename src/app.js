@@ -399,6 +399,7 @@
     dashTo: '',
     showNewInvestmentModal: false,
     mobileNavOpen: false,
+    showSyncChoice: null,
 
     // Cola de Sincronización Móvil Offline (Simulador)
     syncQueue: [],
@@ -422,6 +423,7 @@
     } catch (e) {
       console.error('Error al guardar datos en LocalStorage:', e);
     }
+    try { Sync.onLocalChange(); } catch (e) { console.warn('Sync no disponible:', e); }
   }
 
   // HELPERS DE CÁLCULO Y FORMATEO
@@ -591,6 +593,465 @@
     return P * r / (1 - Math.pow(1 + r, -n));
   }
 
+  // ==========================================================================
+  // IDENTIFICADORES ÚNICOS (necesarios para sincronizar sin choques)
+  // ==========================================================================
+  function newRecordId(prefix) {
+    return prefix + '-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 7).toUpperCase();
+  }
+
+  // ==========================================================================
+  // SINCRONIZACIÓN EN LA NUBE (Supabase) — PC y celular con los mismos datos
+  // Funciona offline-first: los datos siempre se guardan primero en el equipo
+  // y se suben/bajan cuando hay internet y sesión iniciada.
+  // ==========================================================================
+  const SYNC_CONFIG = {
+    url: 'https://vpstsoozumvyjswtuics.supabase.co',
+    key: 'sb_publishable_U37Ml0BvXfeCP91c52vdEQ_EUxtctGV', // clave pública (segura con RLS)
+    table: 'yumax_records',
+  };
+  const SYNC_META_KEY = 'yumax_sync_meta_v1';
+  const SYNC_COLLECTIONS = ['products', 'movements', 'accounts', 'credits', 'sales', 'purchases', 'expenses', 'customers', 'suppliers', 'investments'];
+
+  const Sync = (function () {
+    const status = { state: 'off', message: '', running: false, needsRender: false, remoteCount: null };
+    let pushTimer = null;
+    let applyingRemote = false;
+
+    function loadMeta() {
+      try {
+        const m = JSON.parse(localStorage.getItem(SYNC_META_KEY) || 'null');
+        if (m) return Object.assign({ session: null, cursor: null, hashes: {}, pending: {}, lastSync: null, deviceId: null }, m);
+      } catch (e) { /* noop */ }
+      return { session: null, cursor: null, hashes: {}, pending: {}, lastSync: null, deviceId: null };
+    }
+    const meta = loadMeta();
+    if (!meta.deviceId) meta.deviceId = newRecordId('DEV');
+
+    function saveMeta() {
+      try { localStorage.setItem(SYNC_META_KEY, JSON.stringify(meta)); } catch (e) { console.warn('No se pudo guardar el estado de sincronización', e); }
+    }
+
+    function isConfigured() { return !!(SYNC_CONFIG.url && SYNC_CONFIG.key); }
+    function isLoggedIn() { return !!(meta.session && meta.session.refresh_token); }
+    function pendingCount() { return Object.keys(meta.pending).length; }
+
+    function hashStr(str) {
+      let h = 5381;
+      for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+      return (h >>> 0).toString(36) + ':' + str.length;
+    }
+    function keyOf(coll, id) { return coll + '|' + id; }
+
+    // Garantiza que cada registro tenga un id único dentro de su colección
+    function ensureUniqueIds() {
+      let changed = false;
+      SYNC_COLLECTIONS.forEach(coll => {
+        const seen = new Set();
+        (state[coll] || []).forEach(rec => {
+          if (!rec || typeof rec !== 'object') return;
+          if (!rec.id || seen.has(String(rec.id))) {
+            rec.id = (rec.id ? rec.id + '-' : '') + newRecordId('R');
+            changed = true;
+          }
+          seen.add(String(rec.id));
+        });
+      });
+      return changed;
+    }
+
+    // Detecta qué registros cambiaron desde la última vez y los deja pendientes de subir
+    function trackChanges() {
+      ensureUniqueIds();
+      const now = new Date().toISOString();
+      SYNC_COLLECTIONS.forEach(coll => {
+        const prev = meta.hashes[coll] || {};
+        const next = {};
+        (state[coll] || []).forEach(rec => {
+          if (!rec || !rec.id) return;
+          const id = String(rec.id);
+          const h = hashStr(JSON.stringify(rec));
+          next[id] = h;
+          if (prev[id] !== h) {
+            meta.pending[keyOf(coll, id)] = { collection: coll, record_id: id, data: rec, deleted: false, updated_at: now };
+          }
+        });
+        Object.keys(prev).forEach(id => {
+          if (!(id in next)) {
+            meta.pending[keyOf(coll, id)] = { collection: coll, record_id: id, data: null, deleted: true, updated_at: now };
+          }
+        });
+        meta.hashes[coll] = next;
+      });
+      saveMeta();
+    }
+
+    // Se llama cada vez que la app guarda datos
+    function onLocalChange() {
+      if (applyingRemote) return;
+      if (!isLoggedIn()) {
+        // Sin sesión solo se mantiene la huella para no subir todo de golpe después
+        return;
+      }
+      trackChanges();
+      setStatus(navigator.onLine ? 'pending' : 'offline');
+      clearTimeout(pushTimer);
+      pushTimer = setTimeout(() => syncNow(), 1500);
+    }
+
+    // ---------------- HTTP ----------------
+    async function authRequest(path, body) {
+      const res = await fetch(SYNC_CONFIG.url + '/auth/v1/' + path, {
+        method: 'POST',
+        headers: { apikey: SYNC_CONFIG.key, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = json.error_description || json.msg || json.message || ('Error ' + res.status);
+        throw new Error(msg);
+      }
+      return json;
+    }
+
+    function storeSession(json) {
+      meta.session = {
+        access_token: json.access_token,
+        refresh_token: json.refresh_token,
+        expires_at: Date.now() + (Number(json.expires_in) || 3600) * 1000,
+        user: { id: json.user && json.user.id, email: json.user && json.user.email },
+      };
+      saveMeta();
+    }
+
+    async function refreshSession() {
+      if (!meta.session || !meta.session.refresh_token) throw new Error('Sin sesión');
+      try {
+        const json = await authRequest('token?grant_type=refresh_token', { refresh_token: meta.session.refresh_token });
+        storeSession(json);
+      } catch (e) {
+        if (/invalid|expired|not found|revoked/i.test(e.message)) {
+          meta.session = null;
+          saveMeta();
+          throw new Error('Tu sesión expiró. Inicia sesión de nuevo.');
+        }
+        throw e;
+      }
+    }
+
+    async function api(path, opts, retried) {
+      if (!meta.session) throw new Error('Sin sesión');
+      if (Date.now() > meta.session.expires_at - 60000) await refreshSession();
+      const res = await fetch(SYNC_CONFIG.url + '/rest/v1/' + path, Object.assign({}, opts, {
+        headers: Object.assign({
+          apikey: SYNC_CONFIG.key,
+          Authorization: 'Bearer ' + meta.session.access_token,
+          'Content-Type': 'application/json',
+        }, (opts && opts.headers) || {}),
+      }));
+      if (res.status === 401 && !retried) {
+        await refreshSession();
+        return api(path, opts, true);
+      }
+      if (!res.ok) {
+        const t = await res.text().catch(() => '');
+        throw new Error('Nube ' + res.status + ': ' + t.slice(0, 160));
+      }
+      return res;
+    }
+
+    // ---------------- SUBIR ----------------
+    async function push() {
+      const items = Object.values(meta.pending);
+      if (items.length === 0) return 0;
+      const userId = meta.session.user.id;
+      let sent = 0;
+      for (let i = 0; i < items.length; i += 200) {
+        const batch = items.slice(i, i + 200);
+        const rows = batch.map(it => ({
+          user_id: userId,
+          collection: it.collection,
+          record_id: it.record_id,
+          data: it.data,
+          deleted: it.deleted,
+          updated_at: it.updated_at,
+          device_id: meta.deviceId,
+        }));
+        await api(SYNC_CONFIG.table + '?on_conflict=user_id,collection,record_id', {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify(rows),
+        });
+        batch.forEach(it => {
+          const k = keyOf(it.collection, it.record_id);
+          // Solo se borra de pendientes si no cambió mientras se subía
+          if (meta.pending[k] && meta.pending[k].updated_at === it.updated_at) delete meta.pending[k];
+        });
+        sent += batch.length;
+        saveMeta();
+      }
+      return sent;
+    }
+
+    // ---------------- BAJAR ----------------
+    function applyRemoteRow(row) {
+      const coll = row.collection;
+      if (SYNC_COLLECTIONS.indexOf(coll) === -1) return false;
+      const id = String(row.record_id);
+      const k = keyOf(coll, id);
+      const local = meta.pending[k];
+      if (local && new Date(local.updated_at) > new Date(row.updated_at)) return false; // gana el cambio local más reciente
+
+      const list = state[coll] || (state[coll] = []);
+      const idx = list.findIndex(r => r && String(r.id) === id);
+      const hashes = meta.hashes[coll] || (meta.hashes[coll] = {});
+
+      if (row.deleted || !row.data) {
+        delete meta.pending[k];
+        if (idx === -1) { delete hashes[id]; return false; }
+        list.splice(idx, 1);
+        delete hashes[id];
+        return true;
+      }
+      const h = hashStr(JSON.stringify(row.data));
+      delete meta.pending[k];
+      if (hashes[id] === h && idx !== -1) return false; // ya estaba igual
+      if (idx === -1) list.unshift(row.data); else list[idx] = row.data;
+      hashes[id] = hashStr(JSON.stringify(list[idx === -1 ? 0 : idx]));
+      return true;
+    }
+
+    async function pull() {
+      // Margen de 2 minutos para no perder cambios que lleguen casi al mismo tiempo
+      const since = meta.cursor ? new Date(new Date(meta.cursor).getTime() - 120000).toISOString() : '1970-01-01T00:00:00Z';
+      let offset = 0;
+      let changed = 0;
+      let maxTs = meta.cursor;
+      for (;;) {
+        const res = await api(SYNC_CONFIG.table +
+          '?select=collection,record_id,data,deleted,updated_at,server_updated_at' +
+          '&server_updated_at=gt.' + encodeURIComponent(since) +
+          '&order=server_updated_at.asc,collection.asc,record_id.asc' +
+          '&limit=1000&offset=' + offset, { method: 'GET' });
+        const rows = await res.json();
+        rows.forEach(r => {
+          if (applyRemoteRow(r)) changed++;
+          if (!maxTs || r.server_updated_at > maxTs) maxTs = r.server_updated_at;
+        });
+        if (rows.length < 1000) break;
+        offset += 1000;
+      }
+      meta.cursor = maxTs;
+      saveMeta();
+      return changed;
+    }
+
+    async function countRemote() {
+      const res = await api(SYNC_CONFIG.table + '?select=record_id&deleted=eq.false&limit=1', {
+        method: 'GET', headers: { Prefer: 'count=exact' },
+      });
+      const range = res.headers.get('content-range') || '';
+      const total = parseInt(range.split('/')[1], 10);
+      return isNaN(total) ? null : total;
+    }
+
+    function persistLocalOnly() {
+      applyingRemote = true;
+      try { persistState(); } finally { applyingRemote = false; }
+    }
+
+    function isUserBusy() {
+      const anyModal = Object.keys(state).some(k => /^show.*Modal$/.test(k) && state[k]) || state.showSyncChoice;
+      const ae = document.activeElement;
+      const typing = ae && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName);
+      return anyModal || typing;
+    }
+
+    function safeRender() {
+      if (isUserBusy()) { status.needsRender = true; return; }
+      status.needsRender = false;
+      render();
+    }
+
+    // ---------------- CICLO COMPLETO ----------------
+    async function syncNow(opts) {
+      if (!isConfigured() || !isLoggedIn() || status.running) return;
+      if (!navigator.onLine) { setStatus('offline'); return; }
+      status.running = true;
+      setStatus('syncing');
+      try {
+        trackChanges();
+        await push();
+        const changed = await pull();
+        if (pendingCount() > 0) await push();
+        meta.lastSync = new Date().toISOString();
+        saveMeta();
+        try { status.remoteCount = await countRemote(); } catch (e) { /* opcional */ }
+        if (changed > 0) {
+          persistLocalOnly();
+          safeRender();
+        }
+        setStatus('ok');
+        if (opts && opts.notify) alert(`Sincronización completa.${changed ? ' Se recibieron ' + changed + ' cambio(s) de tus otros equipos.' : ''}`);
+      } catch (e) {
+        console.warn('Error de sincronización:', e);
+        status.message = e.message || String(e);
+        setStatus(isLoggedIn() ? 'error' : 'off');
+        if (opts && opts.notify) alert('No se pudo sincronizar: ' + status.message);
+      } finally {
+        status.running = false;
+      }
+    }
+
+    // ---------------- SESIÓN ----------------
+    async function login(email, password) {
+      const json = await authRequest('token?grant_type=password', { email, password });
+      storeSession(json);
+      // ¿Hay datos en la nube y en este equipo? Preguntar qué hacer
+      const remote = await countRemote().catch(() => 0);
+      status.remoteCount = remote;
+      const localCount = SYNC_COLLECTIONS.reduce((a, c) => a + (state[c] || []).length, 0);
+      if (remote > 0 && localCount > 0) {
+        state.showSyncChoice = { remote, local: localCount };
+        render();
+        return 'choice';
+      }
+      if (remote > 0) {
+        await replaceWithCloud();
+        return 'downloaded';
+      }
+      // Nube vacía: subir todo lo de este equipo
+      meta.hashes = {};
+      meta.pending = {};
+      meta.cursor = null;
+      trackChanges();
+      await syncNow();
+      return 'uploaded';
+    }
+
+    async function replaceWithCloud() {
+      SYNC_COLLECTIONS.forEach(c => { state[c] = []; });
+      meta.hashes = {};
+      meta.pending = {};
+      meta.cursor = null;
+      saveMeta();
+      persistLocalOnly();
+      await syncNow();
+      persistLocalOnly();
+      render();
+    }
+
+    async function mergeWithCloud() {
+      // Todo lo local se marca como cambio (gana sobre la nube si es el mismo registro)
+      meta.hashes = {};
+      meta.pending = {};
+      meta.cursor = null;
+      trackChanges();
+      await syncNow();
+      render();
+    }
+
+    async function logout() {
+      try {
+        if (meta.session && navigator.onLine) {
+          await fetch(SYNC_CONFIG.url + '/auth/v1/logout', {
+            method: 'POST',
+            headers: { apikey: SYNC_CONFIG.key, Authorization: 'Bearer ' + meta.session.access_token },
+          });
+        }
+      } catch (e) { /* noop */ }
+      meta.session = null;
+      meta.pending = {};
+      meta.cursor = null;
+      meta.hashes = {};
+      meta.lastSync = null;
+      saveMeta();
+      status.remoteCount = null;
+      setStatus('off');
+    }
+
+    // ---------------- ESTADO VISUAL ----------------
+    function setStatus(s) {
+      status.state = isLoggedIn() ? s : 'off';
+      updateChips();
+    }
+
+    function chipInfo() {
+      const p = pendingCount();
+      switch (status.state) {
+        case 'syncing': return { cls: 'sync-chip-info', icon: '🔄', text: 'Sincronizando…' };
+        case 'ok': return { cls: 'sync-chip-ok', icon: '☁️', text: 'Sincronizado ' + timeAgo(meta.lastSync) };
+        case 'pending': return { cls: 'sync-chip-info', icon: '⏳', text: p + ' cambio(s) por subir' };
+        case 'offline': return { cls: 'sync-chip-warn', icon: '📴', text: 'Sin internet' + (p ? ' · ' + p + ' pendiente(s)' : '') };
+        case 'error': return { cls: 'sync-chip-error', icon: '⚠️', text: 'Error al sincronizar' };
+        default: return { cls: 'sync-chip-off', icon: '☁️', text: isConfigured() ? 'Sincronización apagada' : 'Solo este equipo' };
+      }
+    }
+
+    function timeAgo(iso) {
+      if (!iso) return '';
+      const s = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+      if (s < 60) return 'ahora';
+      if (s < 3600) return 'hace ' + Math.round(s / 60) + ' min';
+      if (s < 86400) return 'hace ' + Math.round(s / 3600) + ' h';
+      return 'hace ' + Math.round(s / 86400) + ' d';
+    }
+
+    function chipHtml(extraClass) {
+      const c = chipInfo();
+      return `<button class="sync-chip ${c.cls} ${extraClass || ''}" data-sync-chip="1" title="${escapeHtml(status.message || c.text)}" onclick="window.yumax.setTab('datamanagement')"><span>${c.icon}</span><span class="sync-chip-text">${escapeHtml(c.text)}</span></button>`;
+    }
+
+    function updateChips() {
+      const c = chipInfo();
+      document.querySelectorAll('[data-sync-chip]').forEach(el => {
+        el.className = `sync-chip ${c.cls} ${el.classList.contains('sync-chip-compact') ? 'sync-chip-compact' : ''}`;
+        el.title = status.message || c.text;
+        el.innerHTML = `<span>${c.icon}</span><span class="sync-chip-text">${escapeHtml(c.text)}</span>`;
+      });
+      const panel = document.getElementById('sync-panel-status');
+      if (panel) panel.innerHTML = panelStatusHtml();
+    }
+
+    function panelStatusHtml() {
+      const c = chipInfo();
+      return `
+        <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid var(--border-subtle); gap: 1rem;"><span style="color: var(--text-secondary);">Estado</span><span>${c.icon} ${escapeHtml(c.text)}</span></div>
+        <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid var(--border-subtle); gap: 1rem;"><span style="color: var(--text-secondary);">Cuenta</span><span>${escapeHtml(meta.session && meta.session.user ? meta.session.user.email : '—')}</span></div>
+        <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid var(--border-subtle); gap: 1rem;"><span style="color: var(--text-secondary);">Última sincronización</span><span>${meta.lastSync ? escapeHtml(new Date(meta.lastSync).toLocaleString('es-CO')) : '—'}</span></div>
+        <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid var(--border-subtle); gap: 1rem;"><span style="color: var(--text-secondary);">Cambios pendientes por subir</span><span>${pendingCount()}</span></div>
+        <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; gap: 1rem;"><span style="color: var(--text-secondary);">Registros en la nube</span><span>${status.remoteCount == null ? '—' : status.remoteCount}</span></div>
+        ${status.state === 'error' && status.message ? `<div style="margin-top: 0.6rem; font-size: 0.78rem; color: var(--danger-primary);">${escapeHtml(status.message)}</div>` : ''}
+      `;
+    }
+
+    // ---------------- ARRANQUE ----------------
+    function start() {
+      if (!isConfigured()) return;
+      if (isLoggedIn()) {
+        // Primera vez con sesión en este navegador: tomar la foto actual sin re-subir todo
+        SYNC_COLLECTIONS.forEach(c => { if (!meta.hashes[c]) meta.hashes[c] = {}; });
+        setStatus(navigator.onLine ? 'pending' : 'offline');
+        setTimeout(() => syncNow(), 800);
+      }
+      window.addEventListener('online', () => syncNow());
+      window.addEventListener('offline', () => setStatus('offline'));
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncNow(); });
+      setInterval(() => {
+        if (document.visibilityState === 'visible') syncNow();
+        if (status.needsRender && !isUserBusy()) { status.needsRender = false; render(); }
+        updateChips();
+      }, 60000);
+      setInterval(() => { if (status.needsRender && !isUserBusy()) { status.needsRender = false; render(); } }, 3000);
+    }
+
+    return {
+      start, onLocalChange, syncNow, login, logout, replaceWithCloud, mergeWithCloud,
+      isConfigured, isLoggedIn, pendingCount, chipHtml, panelStatusHtml, updateChips,
+      get meta() { return meta; }, get status() { return status; },
+    };
+  })();
+
   function calculateTotalInventoryValuation() {
     let cost = 0;
     let sale = 0;
@@ -746,16 +1207,14 @@
               <button class="btn-secondary" style="font-size: 0.75rem; padding: 0.4rem 0.75rem;" onclick="window.yumax.openDataManagementModal()">
                 ⚙️ Gestión de Datos & Copias
               </button>
-              <div style="display: flex; align-items: center; gap: 0.5rem; background: var(--bg-surface); padding: 0.4rem 0.85rem; border-radius: 20px; border: 1px solid var(--border-subtle); font-size: 0.75rem;">
-                <div style="width: 8px; height: 8px; border-radius: 50%; background: ${isClean ? 'var(--info-primary)' : 'var(--emerald-light)'};"></div>
-                <span style="color: var(--text-secondary);">${isClean ? 'Base de Datos Limpia' : 'Yumax LocalStorage Activo'}</span>
-              </div>
+              ${Sync.chipHtml()}
               <div style="background: rgba(216, 177, 104, 0.12); border: 1px solid rgba(216, 177, 104, 0.35); padding: 0.4rem 0.75rem; border-radius: 8px; font-size: 0.75rem; font-weight: 700; color: var(--gold-light);">
                 COP ($)
               </div>
             </div>
           </header>
 
+          <div class="mobile-only mobile-sync-bar">${Sync.chipHtml('sync-chip-compact')}</div>
           <main class="page-body fade-in">
             ${renderTabContent()}
           </main>
@@ -1049,9 +1508,51 @@
   }
 
   // TAB: GESTIÓN DE DATOS REALES & RESPALDOS
+  function renderSyncCard() {
+    if (!Sync.isConfigured()) return '';
+    if (!Sync.isLoggedIn()) {
+      return `
+        <div class="card" style="padding: 1.75rem; border-color: var(--border-gold);">
+          <h3 style="color: var(--gold-light); margin-bottom: 0.5rem; font-size: 1.25rem; font-family: var(--font-serif);">☁️ Sincronización PC ↔ Celular</h3>
+          <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.6; margin-bottom: 1.25rem;">
+            Inicia sesión con tu usuario de Yumax para que este equipo comparta los mismos datos con tus otros equipos. La app sigue funcionando sin internet y sube los cambios cuando vuelve la conexión.
+          </p>
+          <form onsubmit="window.yumax.syncLogin(event)" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.85rem; align-items: end;">
+            <div>
+              <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">Correo</label>
+              <input type="email" id="sync_email" class="form-input" autocomplete="username" placeholder="correo@yumax.com" required />
+            </div>
+            <div>
+              <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">Contraseña</label>
+              <input type="password" id="sync_password" class="form-input" autocomplete="current-password" required />
+            </div>
+            <button type="submit" id="sync_login_btn" class="btn-gold">Entrar y sincronizar</button>
+          </form>
+          <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.85rem;">
+            Recomendado: inicia sesión primero en el equipo que tiene tus datos reales (el PC). Luego en el celular elige "Usar los datos de la nube".
+          </div>
+        </div>
+      `;
+    }
+    return `
+      <div class="card" style="padding: 1.75rem; border-color: var(--border-gold);">
+        <h3 style="color: var(--gold-light); margin-bottom: 0.75rem; font-size: 1.25rem; font-family: var(--font-serif);">☁️ Sincronización PC ↔ Celular</h3>
+        <div id="sync-panel-status" style="font-size: 0.88rem; margin-bottom: 1.1rem;">${Sync.panelStatusHtml()}</div>
+        <div style="display: flex; flex-wrap: wrap; gap: 0.75rem;">
+          <button class="btn-gold" onclick="window.yumax.syncNowManual()">🔄 Sincronizar ahora</button>
+          <button class="btn-secondary" onclick="window.yumax.syncLogout()">Cerrar sesión en este equipo</button>
+        </div>
+        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.85rem;">
+          Se sincroniza sola al abrir la app, al volver el internet, cada minuto y después de cada cambio. Cerrar sesión no borra los datos de este equipo ni de la nube.
+        </div>
+      </div>
+    `;
+  }
+
   function renderDataManagementTab() {
     return `
       <div style="display: flex; flex-direction: column; gap: 1.5rem; max-width: 900px;">
+        ${renderSyncCard()}
         <div class="card" style="padding: 1.75rem;">
           <h3 style="color: var(--gold-light); margin-bottom: 0.5rem; font-size: 1.25rem; font-family: var(--font-serif);">
             🧹 Limpieza de Datos de Ejemplo & Arranque Real
@@ -2975,6 +3476,32 @@
       `;
     }
 
+    // Modal: Elegir cómo combinar datos al iniciar sesión
+    if (state.showSyncChoice) {
+      const c = state.showSyncChoice;
+      html += `
+        <div class="modal-overlay">
+          <div class="modal-container" style="max-width: 560px;">
+            <div class="modal-header">
+              <h3 style="color: var(--gold-light); margin: 0; font-size: 1.2rem; font-family: var(--font-serif);">☁️ Ya hay datos en la nube</h3>
+            </div>
+            <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.6; margin-bottom: 1.25rem;">
+              La nube tiene <strong style="color: var(--text-primary);">${c.remote}</strong> registros y este equipo tiene <strong style="color: var(--text-primary);">${c.local}</strong>. ¿Qué quieres hacer?
+            </p>
+            <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+              <button class="btn-gold" style="justify-content: flex-start; text-align: left; padding: 0.85rem 1rem;" onclick="window.yumax.syncChooseCloud()">
+                <span>⬇️ <strong>Usar los datos de la nube</strong><br><span style="font-weight: 500; font-size: 0.78rem;">Recomendado en un equipo nuevo o con datos de demostración. Reemplaza lo de este equipo.</span></span>
+              </button>
+              <button class="btn-secondary" style="justify-content: flex-start; text-align: left; padding: 0.85rem 1rem;" onclick="window.yumax.syncChooseMerge()">
+                <span>🔀 <strong>Combinar</strong><br><span style="font-weight: 500; font-size: 0.78rem; color: var(--text-secondary);">Sube también lo de este equipo. Úsalo solo si aquí hay datos reales que no están en la nube.</span></span>
+              </button>
+              <button class="btn-secondary" style="padding: 0.6rem 1rem;" onclick="window.yumax.syncChooseCancel()">Cancelar y cerrar sesión</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     // Modal: Nuevo aporte de Inversión Inicial
     if (state.showNewInvestmentModal) {
       html += `
@@ -3165,6 +3692,58 @@
 
   // ACCIONES GLOBALES EXPUESTAS EN WINDOW
   window.yumax = {
+    // SINCRONIZACIÓN EN LA NUBE
+    async syncLogin(e) {
+      if (e) e.preventDefault();
+      const email = document.getElementById('sync_email').value.trim();
+      const password = document.getElementById('sync_password').value;
+      const btn = document.getElementById('sync_login_btn');
+      if (!navigator.onLine) { alert('Necesitas internet para iniciar sesión la primera vez.'); return; }
+      if (btn) { btn.disabled = true; btn.textContent = 'Conectando…'; }
+      try {
+        const r = await Sync.login(email, password);
+        if (r === 'uploaded') alert('Sesión iniciada. Los datos de este equipo se subieron a la nube.');
+        if (r === 'downloaded') alert('Sesión iniciada. Se descargaron tus datos desde la nube.');
+        render();
+      } catch (err) {
+        const msg = /invalid login|invalid_grant|credentials/i.test(err.message) ? 'Correo o contraseña incorrectos.' : err.message;
+        alert('No se pudo iniciar sesión: ' + msg);
+        render();
+      }
+    },
+
+    async syncChooseCloud() {
+      state.showSyncChoice = null;
+      render();
+      await Sync.replaceWithCloud();
+      alert('Listo. Este equipo ahora tiene los datos de la nube.');
+    },
+
+    async syncChooseMerge() {
+      state.showSyncChoice = null;
+      render();
+      await Sync.mergeWithCloud();
+      alert('Listo. Los datos de este equipo y de la nube quedaron combinados.');
+    },
+
+    async syncChooseCancel() {
+      state.showSyncChoice = null;
+      await Sync.logout();
+      render();
+    },
+
+    async syncNowManual() {
+      await Sync.syncNow({ notify: true });
+      render();
+    },
+
+    async syncLogout() {
+      if (!confirm('¿Cerrar sesión de sincronización en este equipo?\n\nLos datos de este equipo y de la nube NO se borran; simplemente este equipo dejará de sincronizar.')) return;
+      if (Sync.pendingCount() > 0 && !confirm(`Hay ${Sync.pendingCount()} cambio(s) sin subir a la nube. Si cierras sesión ahora no se subirán. ¿Continuar?`)) return;
+      await Sync.logout();
+      render();
+    },
+
     // DASHBOARD: FILTRO DE PERIODO
     setDashPeriod(periodId) {
       state.dashPeriod = periodId;
@@ -3217,7 +3796,7 @@
       if (acc) acc.balance = (Number(acc.balance) || 0) + amount;
 
       state.investments.push({
-        id: 'INV-' + Date.now().toString(),
+        id: newRecordId('INV'),
         category: cat.id,
         category_label: cat.label,
         source,
@@ -3369,7 +3948,7 @@
 
     // GESTIÓN DE DATOS: LIMPIEZA DE DEMO
     clearAllDemoData() {
-      const ok = confirm('¿Estás seguro de que deseas LIMPIAR TODOS los datos de ejemplo de Yumax Joyería?\n\nEl catálogo de joyas, movimientos de kardex, ventas, compras y créditos quedarán en cero para comenzar a ingresar los datos reales de tu negocio.\n\n(Los aportes registrados en Inversión Inicial se conservan.)');
+      const ok = confirm('¿Estás seguro de que deseas LIMPIAR TODOS los datos de ejemplo de Yumax Joyería?\n\nEl catálogo de joyas, movimientos de kardex, ventas, compras y créditos quedarán en cero para comenzar a ingresar los datos reales de tu negocio.\n\n(Los aportes registrados en Inversión Inicial se conservan.)' + (Sync.isLoggedIn() ? '\n\n⚠️ La sincronización está activa: estos registros también se borrarán de la nube y de tus otros equipos.' : ''));
       if (!ok) return;
 
       state.products = [];
@@ -3539,7 +4118,7 @@
       const stock = parseInt(document.getElementById('new_stock').value, 10);
       const location = document.getElementById('new_location').value.trim();
 
-      const newId = '018e5f30-' + Math.random().toString(16).slice(2, 6) + '-7000-8000-0000000000' + (state.products.length + 10);
+      const newId = newRecordId('PRD');
       const barcode = '770' + Math.floor(1000000000 + Math.random() * 9000000000);
       const qr_code = 'YUMAX-' + sku;
 
@@ -3570,7 +4149,7 @@
 
       if (stock > 0) {
         state.movements.unshift({
-          id: 'MOV-' + Date.now().toString().slice(-4),
+          id: newRecordId('MOV'),
           product_id: newId,
           product_sku: sku,
           type: 'ENTRY',
@@ -3744,7 +4323,7 @@
         prod.stock -= it.quantity;
 
         state.movements.unshift({
-          id: 'MOV-' + Date.now().toString().slice(-4) + '-' + Math.floor(Math.random() * 90),
+          id: newRecordId('MOV'),
           product_id: prod.id,
           product_sku: prod.sku,
           type: 'SALE',
@@ -3761,7 +4340,7 @@
 
       // 2. Crear Venta consolidada con todos sus elementos
       const newSale = {
-        id: 'SALE-' + Date.now().toString().slice(-4),
+        id: newRecordId('SALE'),
         invoice: invoiceNumber,
         customer,
         phone: phone || 'No registrado',
@@ -3778,7 +4357,7 @@
       // 3. Afectar Cartera o Tesorería
       if (method === 'CREDIT') {
         state.credits.unshift({
-          id: 'CRED-' + Date.now().toString().slice(-4),
+          id: newRecordId('CRED'),
           customer,
           phone: phone || 'No registrado',
           invoice: invoiceNumber,
@@ -3800,7 +4379,7 @@
         if (phone && phone !== 'No registrado') custObj.phone = phone;
       } else {
         state.customers.push({
-          id: 'CUST-' + Date.now().toString().slice(-4),
+          id: newRecordId('CUST'),
           name: customer,
           phone: phone || 'No registrado',
           email: '',
@@ -3957,7 +4536,7 @@
         prod.current_cost = it.unit_cost;
 
         state.movements.unshift({
-          id: 'MOV-' + Date.now().toString().slice(-4) + '-' + Math.floor(Math.random() * 90),
+          id: newRecordId('MOV'),
           product_id: prod.id,
           product_sku: prod.sku,
           type: 'PURCHASE',
@@ -3977,7 +4556,7 @@
 
       // 3. Registrar Compra Consolidada
       const newPurchase = {
-        id: 'PUR-' + Date.now().toString().slice(-4),
+        id: newRecordId('PUR'),
         purchase_number: invoice,
         supplier,
         date: 'Hoy, ' + new Date().toLocaleTimeString().slice(0, 5),
@@ -3994,7 +4573,7 @@
       let supObj = state.suppliers.find(s => s.name.toLowerCase() === supplier.toLowerCase());
       if (!supObj) {
         state.suppliers.push({
-          id: 'SUP-' + Date.now().toString().slice(-4),
+          id: newRecordId('SUP'),
           name: supplier,
           phone: '',
           contact: 'Contacto Directo',
@@ -4034,7 +4613,7 @@
       acc.balance -= amount;
 
       state.expenses.unshift({
-        id: 'EXP-' + Date.now().toString().slice(-4),
+        id: newRecordId('EXP'),
         concept,
         amount,
         account_id: acc.id,
@@ -4071,7 +4650,7 @@
       prod.stock += delta;
 
       state.movements.unshift({
-        id: 'MOV-' + Date.now().toString().slice(-4),
+        id: newRecordId('MOV'),
         product_id: prod.id,
         product_sku: prod.sku,
         type,
@@ -4133,7 +4712,7 @@
       p.stock -= 1;
       const inv = 'POS-' + Math.floor(892000 + Math.random() * 9000);
       state.sales.unshift({
-        id: 'SALE-' + Date.now().toString().slice(-4),
+        id: newRecordId('SALE'),
         invoice: inv,
         customer: cust,
         date: 'Hoy, ' + new Date().toLocaleTimeString().slice(0, 5),
@@ -4147,7 +4726,7 @@
       state.accounts[0].balance += p.sale_price;
 
       state.movements.unshift({
-        id: 'MOV-' + Date.now().toString().slice(-4),
+        id: newRecordId('MOV'),
         product_id: p.id,
         product_sku: p.sku,
         type: 'SALE',
@@ -4172,6 +4751,7 @@
 
   // INICIALIZAR RENDERIZADO
   render();
+  Sync.start();
 
   // APP INSTALABLE (PWA): funciona sin internet una vez abierta desde un servidor web
   if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
