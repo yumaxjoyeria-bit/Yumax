@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="100%" height="100%">
+  <defs>
+    <linearGradient id="yumaxGoldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FBF3DF" />
+      <stop offset="30%" stop-color="#E8C982" />
+      <stop offset="65%" stop-color="#D8B168" />
+      <stop offset="100%" stop-color="#9E7A32" />
+    </linearGradient>
+    <linearGradient id="yumaxGoldShine" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="40%" stop-color="#EAD198" />
+      <stop offset="100%" stop-color="#C59B48" />
+    </linearGradient>
+    <filter id="goldGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#D8B168" flood-opacity="0.35" />
+    </filter>
+  </defs>
+
+  <!-- Símbolo Floral / Mandala Geométrica Yumax -->
+  <g filter="url(#goldGlow)" stroke="url(#yumaxGoldGrad)" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- Centro / Anillo Central -->
+    <circle cx="120" cy="120" r="14" stroke="url(#yumaxGoldShine)" stroke-width="7" fill="none" />
+
+    <!-- 8 Pétalos / Lazos Radiales a 45 grados -->
+    <!-- 0° (Arriba) -->
+    <g transform="translate(120, 120)">
+      <!-- 8 pétalos simétricos -->
+      <path d="M 0,-18 C -14,-32 -22,-52 0,-82 C 22,-52 14,-32 0,-18 Z" />
+      <path d="M -16,-34 C -36,-38 -54,-24 -36,-2" />
+      
+      <!-- 45° -->
+      <g transform="rotate(45)">
+        <path d="M 0,-18 C -14,-32 -22,-52 0,-82 C 22,-52 14,-32 0,-18 Z" />
+        <path d="M -16,-34 C -36,-38 -54,-24 -36,-2" />
+      </g>
+      <!-- 90° -->
+      <g transform="rotate(90)">
+        <path d="M 0,-18 C -14,-32 -22,-52 0,-82 C 22,-52 14,-32 0,-18 Z" />
+        <path d="M -16,-34 C -36,-38 -54,-24 -36,-2" />
+      </g>
+      <!-- 135° -->
+      <g transform="rotate(135)">
+        <path d="M 0,-18 C -14,-32 -22,-52 0,-82 C 22,-52 14,-32 0,-18 Z" />
+        <path d="M -16,-34 C -36,-38 -54,-24 -36,-2" />
+      </g>
+      <!-- 180° -->
+      <g transform="rotate(180)">
+        <path d="M 0,-18 C -14,-32 -22,-52 0,-82 C 22,-52 14,-32 0,-18 Z" />
+        <path d="M -16,-34 C -36,-38 -54,-24 -36,-2" />
+      </g>
+      <!-- 225° -->
+      <g transform="rotate(225)">
+        <path d="M 0,-18 C -14,-32 -22,-52 0,-82 C 22,-52 14,-32 0,-18 Z" />
+        <path d="M -16,-34 C -36,-38 -54,-24 -36,-2" />
+      </g>
+      <!-- 270° -->
+      <g transform="rotate(270)">
+        <path d="M 0,-18 C -14,-32 -22,-52 0,-82 C 22,-52 14,-32 0,-18 Z" />
+        <path d="M -16,-34 C -36,-38 -54,-24 -36,-2" />
+      </g>
+      <!-- 315° -->
+      <g transform="rotate(315)">
+        <path d="M 0,-18 C -14,-32 -22,-52 0,-82 C 22,-52 14,-32 0,-18 Z" />
+        <path d="M -16,-34 C -36,-38 -54,-24 -36,-2" />
+      </g>
+    </g>
+  </g>
+</svg>
