@@ -3,57 +3,58 @@
    ============================================================================ */
 
 :root {
-  /* Paleta Base Yumax (Obsidiana Profunda con Reflejos Dorados) */
-  --bg-primary: #07090E;
-  --bg-secondary: #0C1018;
-  --bg-surface: #121824;
-  --bg-surface-elevated: #182030;
-  --bg-surface-hover: #222C40;
+  /* Paleta Yumax (tomada del logo: dorado champán sobre blanco, texto café y gris del eslogan) */
+  --bg-primary: #FAF7F1;
+  --bg-secondary: #FFFFFF;
+  --bg-surface: #FFFFFF;
+  --bg-surface-elevated: #F7F1E6;
+  --bg-surface-hover: #EFE5D2;
 
   /* Bordes y Líneas */
-  --border-subtle: #192232;
-  --border-prominent: #29374F;
-  --border-gold: rgba(216, 177, 104, 0.38);
-  --border-gold-strong: #D8B168;
+  --border-subtle: #EEE6D8;
+  --border-prominent: #E0D2B8;
+  --border-gold: rgba(201, 154, 74, 0.45);
+  --border-gold-strong: #C99A4A;
 
-  /* Acento de Lujo Yumax Joyería (Oro Champán & Arena Dorada) */
-  --gold-primary: #D8B168;
-  --gold-light: #F5E4BE;
-  --gold-accent: #E8C982;
-  --gold-dark: #9E7A32;
-  --gold-glow: rgba(216, 177, 104, 0.28);
-  --gold-gradient: linear-gradient(135deg, #FBF3DF 0%, #E8C982 35%, #D8B168 70%, #9E7A32 100%);
-  --gold-gradient-subtle: linear-gradient(135deg, rgba(245, 228, 190, 0.12) 0%, rgba(216, 177, 104, 0.04) 100%);
+  /* Dorados del logo */
+  --gold-primary: #C99A4A;
+  --gold-light: #9A6D22;
+  --gold-accent: #DDB66E;
+  --gold-dark: #8A6420;
+  --gold-glow: rgba(201, 154, 74, 0.25);
+  --gold-gradient: linear-gradient(135deg, #F3DFA5 0%, #E3C07A 40%, #D2A65A 75%, #BF9045 100%);
+  --gold-gradient-subtle: linear-gradient(135deg, rgba(240, 216, 150, 0.22) 0%, rgba(201, 154, 74, 0.06) 100%);
+  --brand-title: #D9A441;
 
-  /* Esmeralda Colombiana Natural */
-  --emerald-primary: #10B981;
-  --emerald-light: #34D399;
+  /* Verde para valores positivos */
+  --emerald-primary: #0F9D6B;
+  --emerald-light: #0E8A5F;
   --emerald-dark: #065F46;
-  --emerald-glow: rgba(16, 185, 129, 0.2);
+  --emerald-glow: rgba(15, 157, 107, 0.15);
 
   /* Estados */
-  --danger-primary: #EF4444;
-  --danger-bg: rgba(239, 68, 68, 0.15);
-  --warning-primary: #F59E0B;
-  --warning-bg: rgba(245, 158, 11, 0.15);
-  --info-primary: #3B82F6;
+  --danger-primary: #D93B3B;
+  --danger-bg: rgba(217, 59, 59, 0.10);
+  --warning-primary: #C77A06;
+  --warning-bg: rgba(245, 158, 11, 0.12);
+  --info-primary: #2F6FD6;
 
   /* Textos */
-  --text-primary: #FFFFFF;
-  --text-secondary: #9DB0C6;
-  --text-muted: #627287;
-  --text-gold: #F5E4BE;
-  --text-slogan: #A3A3A3;
+  --text-primary: #2E2618;
+  --text-secondary: #6E6455;
+  --text-muted: #9C9283;
+  --text-gold: #9A6D22;
+  --text-slogan: #9A9A9A;
 
-  /* Sombras y Efectos */
-  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
-  --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.6);
-  --shadow-gold: 0 4px 20px rgba(216, 177, 104, 0.25);
-  --shadow-gold-hover: 0 6px 25px rgba(216, 177, 104, 0.45);
+  /* Sombras suaves */
+  --shadow-sm: 0 1px 3px rgba(90, 66, 24, 0.06);
+  --shadow-md: 0 4px 16px rgba(90, 66, 24, 0.08);
+  --shadow-lg: 0 12px 30px rgba(90, 66, 24, 0.12);
+  --shadow-gold: 0 4px 16px rgba(201, 154, 74, 0.28);
+  --shadow-gold-hover: 0 6px 22px rgba(201, 154, 74, 0.42);
 
   /* Tipografías */
-  --font-serif: 'Cinzel', 'Playfair Display', Georgia, serif;
+  --font-serif: 'Cormorant Garamond', 'Cinzel', 'Playfair Display', Georgia, 'Times New Roman', serif;
   --font-sans: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-display: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
@@ -124,7 +125,7 @@ h1, h2, h3, h4, h5, h6 {
   width: 44px;
   height: 44px;
   flex-shrink: 0;
-  filter: drop-shadow(0 2px 8px rgba(216, 177, 104, 0.4));
+  filter: none;
 }
 
 .brand-title {
@@ -183,7 +184,7 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--gold-light);
   font-weight: 600;
   border-left-color: var(--gold-primary);
-  box-shadow: inset 0 0 16px rgba(216, 177, 104, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(201, 154, 74, 0.18);
 }
 
 .nav-item-icon {
@@ -301,7 +302,7 @@ h1, h2, h3, h4, h5, h6 {
 /* Botones de Lujo */
 .btn-gold {
   background: var(--gold-gradient);
-  color: #07090E;
+  color: #3B2A10;
   font-weight: 700;
   font-size: 0.875rem;
   letter-spacing: 0.04em;
@@ -402,13 +403,13 @@ h1, h2, h3, h4, h5, h6 {
 
 .badge-danger {
   background: var(--danger-bg);
-  color: #F87171;
+  color: #B42318;
   border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
 .badge-warning {
   background: var(--warning-bg);
-  color: #FBBF24;
+  color: #B45309;
   border: 1px solid rgba(245, 158, 11, 0.3);
 }
 
@@ -435,7 +436,7 @@ h1, h2, h3, h4, h5, h6 {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(4, 6, 10, 0.82);
+  background: rgba(46, 38, 24, 0.35);
   backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
@@ -453,7 +454,7 @@ h1, h2, h3, h4, h5, h6 {
   max-width: 620px;
   max-height: 90vh;
   overflow-y: auto;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
+  box-shadow: 0 20px 50px rgba(90, 66, 24, 0.22);
   padding: 1.75rem;
   animation: slideUp 0.25s ease;
 }
@@ -512,13 +513,13 @@ h1, h2, h3, h4, h5, h6 {
 
 .qty-btn:hover {
   background: var(--gold-primary);
-  color: #07090E;
+  color: #3B2A10;
   border-color: var(--gold-primary);
 }
 
 /* Recibo Térmico de Joyería */
 .receipt-box {
-  background: #0f141f;
+  background: #FFFFFF;
   border: 1px dashed var(--gold-primary);
   border-radius: 12px;
   padding: 1.75rem;
@@ -543,9 +544,9 @@ h1, h2, h3, h4, h5, h6 {
   white-space: nowrap;
 }
 .sync-chip-ok { border-color: rgba(16, 185, 129, 0.35); color: var(--emerald-light); background: rgba(16, 185, 129, 0.1); }
-.sync-chip-info { border-color: rgba(59, 130, 246, 0.35); color: #93C5FD; background: rgba(59, 130, 246, 0.1); }
-.sync-chip-warn { border-color: rgba(245, 158, 11, 0.35); color: #FBBF24; background: var(--warning-bg); }
-.sync-chip-error { border-color: rgba(239, 68, 68, 0.35); color: #F87171; background: var(--danger-bg); }
+.sync-chip-info { border-color: rgba(47, 111, 214, 0.35); color: #2F6FD6; background: rgba(59, 130, 246, 0.1); }
+.sync-chip-warn { border-color: rgba(245, 158, 11, 0.45); color: #B45309; background: var(--warning-bg); }
+.sync-chip-error { border-color: rgba(217, 59, 59, 0.35); color: #B42318; background: var(--danger-bg); }
 .mobile-sync-bar { display: none; }
 
 /* ============================================================================
@@ -575,12 +576,12 @@ h1, h2, h3, h4, h5, h6 {
     overflow-y: auto;
     min-height: 0;
   }
-  .sidebar.open { transform: translateX(0); box-shadow: 8px 0 30px rgba(0, 0, 0, 0.7); }
+  .sidebar.open { transform: translateX(0); box-shadow: 8px 0 30px rgba(90, 66, 24, 0.18); }
   .mobile-backdrop.open {
     display: block;
     position: fixed;
     inset: 0;
-    background: rgba(4, 6, 10, 0.7);
+    background: rgba(46, 38, 24, 0.3);
     z-index: 8999;
   }
 
@@ -661,7 +662,7 @@ h1, h2, h3, h4, h5, h6 {
     border-top: 1px solid var(--border-prominent);
     padding: 0.35rem 0.25rem calc(0.35rem + env(safe-area-inset-bottom));
     justify-content: space-around;
-    box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 -4px 16px rgba(90, 66, 24, 0.08);
   }
   .bottom-nav-btn {
     flex: 1;
@@ -717,3 +718,21 @@ h1, h2, h3, h4, h5, h6 {
     border-color: #cccccc !important;
   }
 }
+
+
+/* ============================================================================
+   MARCA YUMAX (logo oficial) Y AJUSTES DEL TEMA CLARO
+   ============================================================================ */
+.sidebar { box-shadow: 1px 0 0 var(--border-subtle); }
+.sidebar-brand { flex-direction: column; text-align: center; gap: 0.35rem; padding: 1.5rem 1rem 1.25rem; }
+.sidebar-brand .brand-logo-img { width: 76px; height: 76px; }
+.brand-title { font-family: var(--font-serif); color: var(--brand-title); font-weight: 600; font-size: 1.35rem; letter-spacing: 0.06em; }
+.brand-subtitle { color: var(--text-slogan); letter-spacing: 0.24em; font-size: 0.62rem; }
+.top-header { box-shadow: 0 1px 0 var(--border-subtle); }
+.btn-gold { color: #3B2A10; box-shadow: 0 2px 8px rgba(201, 154, 74, 0.25); }
+.btn-secondary { background: #FFFFFF; border-color: var(--border-prominent); color: var(--text-primary); }
+.btn-secondary:hover { background: var(--bg-surface-elevated); color: var(--gold-dark); border-color: var(--border-gold); }
+.form-input { background-color: #FFFFFF; border-color: var(--border-prominent); }
+.form-input::placeholder { color: var(--text-muted); }
+.nav-item-btn.active { background: var(--gold-gradient-subtle); color: var(--gold-dark); }
+.nav-item-btn:hover { background: var(--bg-surface-elevated); color: var(--gold-dark); }

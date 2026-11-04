@@ -12,57 +12,7 @@
   const STORAGE_KEY = 'yumax_jewelry_system_data_v1';
 
   // LOGO EMBLEMA SVG VECTORIAL DE YUMAX JOYERÍA
-  const YUMAX_LOGO_SVG = `
-    <svg viewBox="0 0 240 240" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="ygGold" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#FBF3DF" />
-          <stop offset="30%" stop-color="#E8C982" />
-          <stop offset="70%" stop-color="#D8B168" />
-          <stop offset="100%" stop-color="#9E7A32" />
-        </linearGradient>
-        <filter id="ygGlow" x="-20%" y="-20%" width="140%" height="140%">
-          <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#D8B168" flood-opacity="0.3" />
-        </filter>
-      </defs>
-      <g filter="url(#ygGlow)" stroke="url(#ygGold)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none">
-        <circle cx="120" cy="120" r="14" stroke="url(#ygGold)" stroke-width="7" fill="none" />
-        <g transform="translate(120, 120)">
-          <!-- 8 pétalos simétricos a 45 grados -->
-          <path d="M 0,-18 C -14,-32 -22,-52 0,-82 C 22,-52 14,-32 0,-18 Z" />
-          <path d="M -16,-34 C -36,-38 -54,-24 -36,-2" />
-          <g transform="rotate(45)">
-            <path d="M 0,-18 C -14,-32 -22,-52 0,-82 C 22,-52 14,-32 0,-18 Z" />
-            <path d="M -16,-34 C -36,-38 -54,-24 -36,-2" />
-          </g>
-          <g transform="rotate(90)">
-            <path d="M 0,-18 C -14,-32 -22,-52 0,-82 C 22,-52 14,-32 0,-18 Z" />
-            <path d="M -16,-34 C -36,-38 -54,-24 -36,-2" />
-          </g>
-          <g transform="rotate(135)">
-            <path d="M 0,-18 C -14,-32 -22,-52 0,-82 C 22,-52 14,-32 0,-18 Z" />
-            <path d="M -16,-34 C -36,-38 -54,-24 -36,-2" />
-          </g>
-          <g transform="rotate(180)">
-            <path d="M 0,-18 C -14,-32 -22,-52 0,-82 C 22,-52 14,-32 0,-18 Z" />
-            <path d="M -16,-34 C -36,-38 -54,-24 -36,-2" />
-          </g>
-          <g transform="rotate(225)">
-            <path d="M 0,-18 C -14,-32 -22,-52 0,-82 C 22,-52 14,-32 0,-18 Z" />
-            <path d="M -16,-34 C -36,-38 -54,-24 -36,-2" />
-          </g>
-          <g transform="rotate(270)">
-            <path d="M 0,-18 C -14,-32 -22,-52 0,-82 C 22,-52 14,-32 0,-18 Z" />
-            <path d="M -16,-34 C -36,-38 -54,-24 -36,-2" />
-          </g>
-          <g transform="rotate(315)">
-            <path d="M 0,-18 C -14,-32 -22,-52 0,-82 C 22,-52 14,-32 0,-18 Z" />
-            <path d="M -16,-34 C -36,-38 -54,-24 -36,-2" />
-          </g>
-        </g>
-      </g>
-    </svg>
-  `;
+  const YUMAX_LOGO_SVG = `<img src="./src/assets/yumax-simbolo.svg" alt="Yumax Joyería" style="width: 100%; height: 100%; object-fit: contain; display: block;" />`;
 
   // DATOS DE DEMOSTRACIÓN PREDETERMINADOS PARA YUMAX JOYERÍA
   const DEFAULT_DEMO_DATA = {
@@ -252,31 +202,7 @@
         notes: 'Venta inicial en mostrador',
       },
     ],
-    purchases: [
-      {
-        id: 'PUR-1001',
-        purchase_number: 'COM-7701',
-        supplier: 'Orfebres Italianos & Cía',
-        date: '12 Ago 2026, 14:15',
-        full_date: '2026-08-12 14:15',
-        account_id: 'ACC-2',
-        account_name: 'Bancolombia Principal',
-        total: 12300000,
-        user: 'admin@yumaxjoyeria.com',
-        notes: 'Lote de importación de cadenas oro italiano 18k',
-        items: [
-          {
-            product_id: '018e5f30-0011-7000-8000-000000000011',
-            sku: 'YUM-CAD-ORO-002',
-            name: 'Cadena Eslabón Cubano 50cm',
-            quantity: 3,
-            unit_cost: 4100000,
-            subtotal: 12300000,
-            projected_cpp: 4050000,
-          }
-        ]
-      }
-    ],
+    purchases: [],
     expenses: [
       {
         id: 'EXP-1',
@@ -300,6 +226,7 @@
       { id: 'SUP-3', name: 'Fundición & Metales Bogotá', phone: '315 456 7890', contact: 'Roberto Peña', category: 'Oro Granalla y Plata 925' },
     ],
     investments: [],
+    cashMovements: [],
   };
 
   // CARGAR DATOS PERSISTIDOS O INICIALIZAR
@@ -314,11 +241,12 @@
           accounts: parsed.accounts || DEFAULT_DEMO_DATA.accounts,
           credits: parsed.credits || [],
           sales: parsed.sales || [],
-          purchases: parsed.purchases || DEFAULT_DEMO_DATA.purchases || [],
+          purchases: parsed.purchases || [],
           expenses: parsed.expenses || [],
           customers: parsed.customers || [],
           suppliers: parsed.suppliers || [],
           investments: parsed.investments || [],
+          cashMovements: parsed.cashMovements || [],
         };
       }
     } catch (e) {
@@ -329,13 +257,39 @@
 
   const initialData = loadPersistedData();
 
+  // REGISTROS DE PRUEBA ANTIGUOS QUE NO DEBEN EXISTIR EN LOS DATOS REALES
+  // Compra COM-7701 (PUR-1001): registro de prueba de la primera versión de la app.
+  function purgeTestRecords(data) {
+    let removed = 0;
+    if (Array.isArray(data.purchases)) {
+      const before = data.purchases.length;
+      data.purchases = data.purchases.filter(pu => !(pu && pu.id === 'PUR-1001' && pu.purchase_number === 'COM-7701'));
+      removed += before - data.purchases.length;
+    }
+    // Su movimiento de Kardex solo se quita si la joya de prueba ya no está en el catálogo (no afecta stock real)
+    const demoCadena = '018e5f30-0011-7000-8000-000000000011';
+    if (Array.isArray(data.movements) && !(data.products || []).some(pr => pr && pr.id === demoCadena)) {
+      const before = data.movements.length;
+      data.movements = data.movements.filter(m => !(m && m.id === 'MOV-1002' && m.product_id === demoCadena));
+      removed += before - data.movements.length;
+    }
+    return removed;
+  }
+  const testRecordsRemovedAtLoad = purgeTestRecords(initialData);
+
+  // Nombre de quien usa este equipo (se guarda en cada registro para saber quién lo hizo)
+  const OPERATOR_KEY = 'yumax_operator_name';
+  function loadOperatorName() {
+    try { return (localStorage.getItem(OPERATOR_KEY) || '').trim(); } catch (e) { return ''; }
+  }
+
   // ESTADO GLOBAL REACTIVO DE LA APLICACIÓN
   const state = {
     currentTab: 'inventory',
     activeUser: {
       id: '018e5f30-0001-7000-8000-000000000001',
-      name: 'Director General Yumax',
-      email: 'admin@yumaxjoyeria.com',
+      name: loadOperatorName() || 'Director General Yumax',
+      email: loadOperatorName() || 'admin@yumaxjoyeria.com',
       role: 'ADMINISTRATOR',
     },
     inventorySearch: '',
@@ -392,6 +346,7 @@
     customers: initialData.customers,
     suppliers: initialData.suppliers,
     investments: initialData.investments || [],
+    cashMovements: initialData.cashMovements || [],
 
     // Filtro de periodo del Dashboard
     dashPeriod: 'MONTH',
@@ -405,7 +360,94 @@
     syncQueue: [],
   };
 
+  // ==========================================================================
+  // VALORES CALCULADOS (evitan choques cuando dos personas registran a la vez)
+  // stock  = stock_base + suma de movimientos del Kardex
+  // saldo  = balance_base + suma del libro de caja (cashMovements)
+  // abonos = paid_base + suma de abonos del libro de caja
+  // ==========================================================================
+  function getCashAccount() {
+    return state.accounts.find(a => a.type === 'CASH') || state.accounts.find(a => a.id === 'ACC-1') || state.accounts[0];
+  }
+
+  // Orden estable de las listas después de recibir datos de otro equipo
+  function sortCollections() {
+    const stamp = r => String(r.full_date || r.date || '');
+    const isStd = v => /^\d{4}-\d{2}-\d{2}/.test(v);
+    const byDateDesc = (a, b) => {
+      const x = stamp(a), y = stamp(b);
+      if (isStd(x) && isStd(y)) return y.localeCompare(x);
+      if (isStd(x)) return 1;   // registros antiguos sin fecha estándar ("Hoy, 14:32") arriba, como antes
+      if (isStd(y)) return -1;
+      return 0;
+    };
+    ['movements', 'cashMovements', 'sales', 'purchases', 'expenses'].forEach(k => {
+      if (Array.isArray(state[k])) state[k] = state[k].slice().sort(byDateDesc);
+    });
+    const accNum = a => { const m = String(a.id).match(/(\d+)$/); return m ? parseInt(m[1], 10) : 9999; };
+    state.accounts = state.accounts.slice().sort((a, b) => accNum(a) - accNum(b) || String(a.id).localeCompare(String(b.id)));
+  }
+
+  function postCash(accountId, amount, type, ref, notes, extra) {
+    const acc = state.accounts.find(a => a.id === accountId) || state.accounts[0];
+    if (!acc || !amount) return null;
+    const entry = Object.assign({
+      id: newRecordId('CAJ'),
+      account_id: acc.id,
+      account_name: acc.name,
+      amount: Math.round(Number(amount) * 100) / 100,
+      type,
+      ref: ref || '',
+      notes: notes || '',
+      date: nowLocalStamp(),
+      user: state.activeUser.email,
+    }, extra || {});
+    state.cashMovements.unshift(entry);
+    recalcDerived();
+    return entry;
+  }
+
+  function recalcDerived() {
+    // Sumas por producto, cuenta y crédito
+    const movByProd = {};
+    state.movements.forEach(m => {
+      const k = m.product_id || ('SKU:' + m.product_sku);
+      movByProd[k] = (movByProd[k] || 0) + (Number(m.quantity) || 0);
+    });
+    const cashByAcc = {};
+    const paidByCred = {};
+    (state.cashMovements || []).forEach(c => {
+      cashByAcc[c.account_id] = (cashByAcc[c.account_id] || 0) + (Number(c.amount) || 0);
+      if (c.credit_id) paidByCred[c.credit_id] = (paidByCred[c.credit_id] || 0) + (Number(c.amount) || 0);
+    });
+
+    state.products.forEach(p => {
+      const sum = (movByProd[p.id] || 0) + (movByProd['SKU:' + p.sku] || 0);
+      if (typeof p.stock_base !== 'number') p.stock_base = (Number(p.stock) || 0) - sum;
+      const v = p.stock_base + sum;
+      if (p.stock !== v) p.stock = v;
+    });
+    state.accounts.forEach(a => {
+      const sum = cashByAcc[a.id] || 0;
+      if (typeof a.balance_base !== 'number') a.balance_base = (Number(a.balance) || 0) - sum;
+      const v = Math.round((a.balance_base + sum) * 100) / 100;
+      if (a.balance !== v) a.balance = v;
+    });
+    state.credits.forEach(c => {
+      const sum = paidByCred[c.id] || 0;
+      if (typeof c.paid_base !== 'number') c.paid_base = (Number(c.paid) || 0) - sum;
+      const paid = c.paid_base + sum;
+      const bal = Math.max(0, (Number(c.total) || 0) - paid);
+      if (c.paid !== paid) c.paid = paid;
+      if (c.balance !== bal) c.balance = bal;
+      const st = bal <= 0 ? 'PAID' : (c.status === 'PAID' ? 'ACTIVE' : c.status);
+      if (c.status !== st) c.status = st;
+    });
+  }
+
   function persistState() {
+    try { purgeTestRecords(state); } catch (e) { /* noop */ }
+    try { recalcDerived(); } catch (e) { console.warn('No se pudieron recalcular stock/saldos:', e); }
     try {
       const dataToSave = {
         products: state.products,
@@ -418,6 +460,7 @@
         customers: state.customers,
         suppliers: state.suppliers,
         investments: state.investments,
+        cashMovements: state.cashMovements,
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
     } catch (e) {
@@ -557,11 +600,11 @@
   // INVERSIÓN INICIAL
   // ==========================================================================
   const INVESTMENT_CATEGORIES = [
-    { id: 'OWN_CAPITAL', label: 'Capital propio', icon: '🏠', color: '#34D399', isDebt: false },
-    { id: 'CREDIT_CARD', label: 'Tarjetas de crédito', icon: '💳', color: '#F59E0B', isDebt: true },
-    { id: 'BANK_LOAN', label: 'Créditos bancarios', icon: '🏦', color: '#60A5FA', isDebt: true },
-    { id: 'THIRD_PARTY_LOAN', label: 'Préstamos de terceros / familiares', icon: '🤝', color: '#C084FC', isDebt: true },
-    { id: 'OTHER', label: 'Otros aportes', icon: '📦', color: '#94A3B8', isDebt: false },
+    { id: 'OWN_CAPITAL', label: 'Capital propio', icon: '🏠', color: '#0F9D6B', isDebt: false },
+    { id: 'CREDIT_CARD', label: 'Tarjetas de crédito', icon: '💳', color: '#D97706', isDebt: true },
+    { id: 'BANK_LOAN', label: 'Créditos bancarios', icon: '🏦', color: '#2F6FD6', isDebt: true },
+    { id: 'THIRD_PARTY_LOAN', label: 'Préstamos de terceros / familiares', icon: '🤝', color: '#8B5CF6', isDebt: true },
+    { id: 'OTHER', label: 'Otros aportes', icon: '📦', color: '#7C8594', isDebt: false },
   ];
 
   function getInvestmentCategory(id) {
@@ -611,7 +654,7 @@
     table: 'yumax_records',
   };
   const SYNC_META_KEY = 'yumax_sync_meta_v1';
-  const SYNC_COLLECTIONS = ['products', 'movements', 'accounts', 'credits', 'sales', 'purchases', 'expenses', 'customers', 'suppliers', 'investments'];
+  const SYNC_COLLECTIONS = ['products', 'movements', 'accounts', 'credits', 'sales', 'purchases', 'expenses', 'customers', 'suppliers', 'investments', 'cashMovements'];
 
   const Sync = (function () {
     const status = { state: 'off', message: '', running: false, needsRender: false, remoteCount: null };
@@ -888,9 +931,13 @@
         saveMeta();
         try { status.remoteCount = await countRemote(); } catch (e) { /* opcional */ }
         if (changed > 0) {
+          sortCollections();
           persistLocalOnly();
           safeRender();
         }
+        // Si al guardar se depuró o recalculó algo, se sube en esta misma sincronización
+        trackChanges();
+        if (pendingCount() > 0) await push();
         setStatus('ok');
         if (opts && opts.notify) alert(`Sincronización completa.${changed ? ' Se recibieron ' + changed + ' cambio(s) de tus otros equipos.' : ''}`);
       } catch (e) {
@@ -924,6 +971,7 @@
       meta.hashes = {};
       meta.pending = {};
       meta.cursor = null;
+      persistLocalOnly();
       trackChanges();
       await syncNow();
       return 'uploaded';
@@ -946,6 +994,7 @@
       meta.hashes = {};
       meta.pending = {};
       meta.cursor = null;
+      persistLocalOnly();
       trackChanges();
       await syncNow();
       render();
@@ -1508,6 +1557,12 @@
   }
 
   // TAB: GESTIÓN DE DATOS REALES & RESPALDOS
+  function setOperatorName(name) {
+    try { localStorage.setItem(OPERATOR_KEY, name); } catch (e) { /* noop */ }
+    state.activeUser.name = name;
+    state.activeUser.email = name;
+  }
+
   function renderSyncCard() {
     if (!Sync.isConfigured()) return '';
     if (!Sync.isLoggedIn()) {
@@ -1518,6 +1573,10 @@
             Inicia sesión con tu usuario de Yumax para que este equipo comparta los mismos datos con tus otros equipos. La app sigue funcionando sin internet y sube los cambios cuando vuelve la conexión.
           </p>
           <form onsubmit="window.yumax.syncLogin(event)" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.85rem; align-items: end;">
+            <div>
+              <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">Tu nombre (quién usa este equipo)</label>
+              <input type="text" id="sync_operator" class="form-input" placeholder="ej. Randy" value="${escapeHtml(loadOperatorName())}" required />
+            </div>
             <div>
               <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">Correo</label>
               <input type="email" id="sync_email" class="form-input" autocomplete="username" placeholder="correo@yumax.com" required />
@@ -1538,6 +1597,13 @@
       <div class="card" style="padding: 1.75rem; border-color: var(--border-gold);">
         <h3 style="color: var(--gold-light); margin-bottom: 0.75rem; font-size: 1.25rem; font-family: var(--font-serif);">☁️ Sincronización PC ↔ Celular</h3>
         <div id="sync-panel-status" style="font-size: 0.88rem; margin-bottom: 1.1rem;">${Sync.panelStatusHtml()}</div>
+        <div style="display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: flex-end; margin-bottom: 1.1rem; padding: 0.85rem; background: var(--bg-primary); border-radius: 10px;">
+          <div style="flex: 1 1 200px;">
+            <label style="display: block; font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 0.3rem;">Quién usa este equipo (queda en cada venta, compra y movimiento)</label>
+            <input type="text" id="sync_operator_edit" class="form-input" value="${escapeHtml(loadOperatorName())}" placeholder="ej. Randy" />
+          </div>
+          <button class="btn-secondary" onclick="window.yumax.saveOperatorName()">Guardar nombre</button>
+        </div>
         <div style="display: flex; flex-wrap: wrap; gap: 0.75rem;">
           <button class="btn-gold" onclick="window.yumax.syncNowManual()">🔄 Sincronizar ahora</button>
           <button class="btn-secondary" onclick="window.yumax.syncLogout()">Cerrar sesión en este equipo</button>
@@ -1997,6 +2063,37 @@
               <div class="metric-value" style="font-size: 1.35rem; color: var(--gold-light);">${formatCOP(a.balance)}</div>
             </div>
           `).join('')}
+        </div>
+
+        <!-- Libro de caja: cada entrada y salida de dinero -->
+        <div class="card" style="padding: 0; overflow: hidden;">
+          <div style="padding: 1rem 1.25rem; border-bottom: 1px solid var(--border-subtle);">
+            <div style="font-weight: 600; color: var(--gold-light); font-family: var(--font-serif);">Libro de caja (últimos 50 movimientos)</div>
+            <div style="font-size: 0.78rem; color: var(--text-secondary);">Los saldos de las cuentas se calculan a partir de estos movimientos, así no se pisan aunque dos personas registren al mismo tiempo.</div>
+          </div>
+          <div style="overflow-x: auto;">
+            <table class="data-table">
+              <thead>
+                <tr><th>Fecha</th><th>Tipo</th><th>Cuenta</th><th>Referencia / Detalle</th><th style="text-align: right;">Valor</th><th>Registró</th></tr>
+              </thead>
+              <tbody>
+                ${(state.cashMovements || []).length === 0 ? `
+                  <tr><td colspan="6" style="text-align: center; padding: 2rem; color: var(--text-muted);">Aún no hay movimientos de caja. Se registran solos con cada venta, compra, gasto, abono o ajuste.</td></tr>
+                ` : state.cashMovements.slice(0, 50).map(c => {
+                  const labels = { VENTA: '🛒 Venta', COMPRA: '🛍️ Compra', GASTO: '💸 Gasto', ABONO: '💳 Abono', INVERSION: '💰 Aporte', INVERSION_ANULADA: '↩️ Aporte anulado', AJUSTE_SALDO: '✏️ Ajuste' };
+                  return `
+                    <tr>
+                      <td style="white-space: nowrap; font-size: 0.8rem;">${escapeHtml(c.date)}</td>
+                      <td>${labels[c.type] || escapeHtml(c.type)}</td>
+                      <td style="font-size: 0.82rem;">${escapeHtml(c.account_name || c.account_id)}</td>
+                      <td style="font-size: 0.82rem;"><span style="font-family: monospace; color: var(--text-secondary);">${escapeHtml(c.ref || '')}</span> ${escapeHtml(c.notes || '')}</td>
+                      <td style="text-align: right; font-family: monospace; white-space: nowrap; font-weight: 700; color: ${c.amount >= 0 ? 'var(--emerald-light)' : 'var(--danger-primary)'};">${c.amount >= 0 ? '+' : '−'}${formatCOP(Math.abs(c.amount))}</td>
+                      <td style="font-size: 0.8rem; color: var(--text-secondary);">${escapeHtml(c.user || '')}</td>
+                    </tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <!-- Historial de Egresos -->
@@ -3697,6 +3794,8 @@
       if (e) e.preventDefault();
       const email = document.getElementById('sync_email').value.trim();
       const password = document.getElementById('sync_password').value;
+      const opEl = document.getElementById('sync_operator');
+      if (opEl && opEl.value.trim()) setOperatorName(opEl.value.trim());
       const btn = document.getElementById('sync_login_btn');
       if (!navigator.onLine) { alert('Necesitas internet para iniciar sesión la primera vez.'); return; }
       if (btn) { btn.disabled = true; btn.textContent = 'Conectando…'; }
@@ -3710,6 +3809,15 @@
         alert('No se pudo iniciar sesión: ' + msg);
         render();
       }
+    },
+
+    saveOperatorName() {
+      const el = document.getElementById('sync_operator_edit');
+      const v = el ? el.value.trim() : '';
+      if (!v) { alert('Escribe un nombre.'); return; }
+      setOperatorName(v);
+      render();
+      alert(`Listo. Los registros de este equipo quedarán a nombre de "${v}".`);
     },
 
     async syncChooseCloud() {
@@ -3793,10 +3901,11 @@
 
       const cat = getInvestmentCategory(category);
       const acc = accId ? state.accounts.find(a => a.id === accId) : null;
-      if (acc) acc.balance = (Number(acc.balance) || 0) + amount;
+      const invId = newRecordId('INV');
+      if (acc) postCash(acc.id, amount, 'INVERSION', invId, `Aporte ${cat.label}${source ? ' - ' + source : ''}`);
 
       state.investments.push({
-        id: newRecordId('INV'),
+        id: invId,
         category: cat.id,
         category_label: cat.label,
         source,
@@ -3824,7 +3933,11 @@
       const msg = `¿Eliminar el aporte de ${formatCOP(inv.amount)} (${getInvestmentCategory(inv.category).label})?` +
         (acc ? `\n\nTambién se restará ${formatCOP(inv.amount)} del saldo de ${acc.name}.` : '');
       if (!confirm(msg)) return;
-      if (acc) acc.balance = (Number(acc.balance) || 0) - (Number(inv.amount) || 0);
+      if (acc) {
+        const linked = state.cashMovements.filter(c => c.type === 'INVERSION' && c.ref === inv.id);
+        if (linked.length) state.cashMovements = state.cashMovements.filter(c => !(c.type === 'INVERSION' && c.ref === inv.id));
+        else postCash(acc.id, -(Number(inv.amount) || 0), 'INVERSION_ANULADA', inv.id, 'Reverso de aporte eliminado');
+      }
       state.investments = state.investments.filter(i => i.id !== invId);
       persistState();
       render();
@@ -3951,6 +4064,9 @@
       const ok = confirm('¿Estás seguro de que deseas LIMPIAR TODOS los datos de ejemplo de Yumax Joyería?\n\nEl catálogo de joyas, movimientos de kardex, ventas, compras y créditos quedarán en cero para comenzar a ingresar los datos reales de tu negocio.\n\n(Los aportes registrados en Inversión Inicial se conservan.)' + (Sync.isLoggedIn() ? '\n\n⚠️ La sincronización está activa: estos registros también se borrarán de la nube y de tus otros equipos.' : ''));
       if (!ok) return;
 
+      recalcDerived();
+      state.accounts.forEach(a => { a.balance_base = a.balance; });
+      state.cashMovements = [];
       state.products = [];
       state.movements = [];
       state.sales = [];
@@ -3980,6 +4096,7 @@
       state.expenses = demo.expenses;
       state.customers = demo.customers;
       state.suppliers = demo.suppliers;
+      state.cashMovements = [];
 
       persistState();
       render();
@@ -4003,6 +4120,7 @@
           customers: state.customers,
           suppliers: state.suppliers,
           investments: state.investments,
+          cashMovements: state.cashMovements,
         }
       };
 
@@ -4051,6 +4169,15 @@
           if (data.customers) state.customers = data.customers;
           if (data.suppliers) state.suppliers = data.suppliers;
           if (data.investments) state.investments = data.investments;
+          if (data.cashMovements) {
+            state.cashMovements = data.cashMovements;
+          } else {
+            // Respaldo antiguo sin libro de caja: los saldos y abonos importados son la nueva base
+            state.cashMovements = [];
+            (state.accounts || []).forEach(a => { delete a.balance_base; });
+            (state.credits || []).forEach(c => { delete c.paid_base; });
+            (state.products || []).forEach(p => { delete p.stock_base; });
+          }
 
           persistState();
           render();
@@ -4068,8 +4195,8 @@
         const valStr = prompt(`Saldo para ${acc.name} (${acc.icon}):`, acc.balance);
         if (valStr !== null) {
           const val = parseFloat(valStr);
-          if (!isNaN(val) && val >= 0) {
-            acc.balance = val;
+          if (!isNaN(val) && val >= 0 && val !== acc.balance) {
+            postCash(acc.id, val - acc.balance, 'AJUSTE_SALDO', '', `Ajuste manual de saldo a ${formatCOP(val)}`);
           }
         }
       });
@@ -4085,7 +4212,7 @@
       if (valStr !== null) {
         const val = parseFloat(valStr);
         if (!isNaN(val) && val >= 0) {
-          acc.balance = val;
+          if (val !== acc.balance) postCash(acc.id, val - acc.balance, 'AJUSTE_SALDO', '', `Ajuste manual de saldo a ${formatCOP(val)}`);
           persistState();
           render();
         }
@@ -4344,7 +4471,7 @@
         invoice: invoiceNumber,
         customer,
         phone: phone || 'No registrado',
-        date: 'Hoy, ' + new Date().toLocaleTimeString().slice(0, 5),
+        date: 'Hoy, ' + nowLocalStamp().slice(11),
         full_date: nowLocalStamp(),
         method,
         total,
@@ -4369,7 +4496,7 @@
         });
       } else {
         const targetAcc = state.accounts.find(a => a.type === method) || state.accounts[0];
-        targetAcc.balance += total;
+        postCash(targetAcc.id, total, 'VENTA', invoiceNumber, `Venta a ${customer}`);
       }
 
       // 4. Actualizar o registrar Cliente en la base de datos
@@ -4552,14 +4679,14 @@
       });
 
       // 2. Descontar total de la cuenta de tesorería
-      acc.balance -= totalPurchase;
+      postCash(acc.id, -totalPurchase, 'COMPRA', invoice, `Compra a ${supplier}`);
 
       // 3. Registrar Compra Consolidada
       const newPurchase = {
         id: newRecordId('PUR'),
         purchase_number: invoice,
         supplier,
-        date: 'Hoy, ' + new Date().toLocaleTimeString().slice(0, 5),
+        date: 'Hoy, ' + nowLocalStamp().slice(11),
         full_date: nowLocalStamp(),
         account_id: acc.id,
         account_name: acc.name,
@@ -4610,15 +4737,16 @@
       const accId = document.getElementById('exp_account_id').value;
 
       const acc = state.accounts.find(a => a.id === accId) || state.accounts[0];
-      acc.balance -= amount;
+      const expId = newRecordId('EXP');
+      postCash(acc.id, -amount, 'GASTO', expId, concept);
 
       state.expenses.unshift({
-        id: newRecordId('EXP'),
+        id: expId,
         concept,
         amount,
         account_id: acc.id,
         account_name: acc.name,
-        date: 'Hoy, ' + new Date().toLocaleTimeString().slice(0, 5),
+        date: 'Hoy, ' + nowLocalStamp().slice(11),
         full_date: nowLocalStamp(),
         user: state.activeUser.email,
       });
@@ -4681,15 +4809,11 @@
         return;
       }
 
-      cred.paid += amount;
-      cred.balance -= amount;
-      if (cred.balance === 0) cred.status = 'PAID';
-
-      state.accounts[0].balance += amount;
+      postCash(getCashAccount().id, amount, 'ABONO', cred.invoice, `Abono de ${cred.customer}`, { credit_id: cred.id });
 
       persistState();
       render();
-      alert(`Abono de ${formatCOP(amount)} recibido y sumado a Caja General Efectivo.`);
+      alert(`Abono de ${formatCOP(amount)} recibido y sumado a ${getCashAccount().name}.`);
     },
 
     mobileScanPrompt() {
@@ -4715,7 +4839,7 @@
         id: newRecordId('SALE'),
         invoice: inv,
         customer: cust,
-        date: 'Hoy, ' + new Date().toLocaleTimeString().slice(0, 5),
+        date: 'Hoy, ' + nowLocalStamp().slice(11),
         full_date: nowLocalStamp(),
         method: 'CASH',
         total: p.sale_price,
@@ -4723,7 +4847,7 @@
         items: [{ product_id: p.id, sku: p.sku, name: p.name, quantity: 1, unit_price: p.sale_price, subtotal: p.sale_price }],
         user: 'asesor@yumaxjoyeria.com',
       });
-      state.accounts[0].balance += p.sale_price;
+      postCash(getCashAccount().id, p.sale_price, 'VENTA', inv, `Venta móvil a ${cust}`);
 
       state.movements.unshift({
         id: newRecordId('MOV'),
@@ -4750,8 +4874,10 @@
   window.aurum = window.yumax;
 
   // INICIALIZAR RENDERIZADO
+  try { recalcDerived(); } catch (e) { console.warn(e); }
   render();
   Sync.start();
+  if (testRecordsRemovedAtLoad > 0) persistState(); // guarda y propaga el borrado a la nube y otros equipos
 
   // APP INSTALABLE (PWA): funciona sin internet una vez abierta desde un servidor web
   if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {

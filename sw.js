@@ -4,7 +4,7 @@
  * descarga la versión nueva en segundo plano (se ve en la siguiente apertura).
  * Los DATOS del negocio no pasan por aquí: viven en el almacenamiento local del equipo.
  */
-const CACHE = 'yumax-app-v2';
+const CACHE = 'yumax-app-v3';
 const APP_FILES = [
   './',
   './index.html',
@@ -12,6 +12,7 @@ const APP_FILES = [
   './src/app.js',
   './src/index.css',
   './src/assets/yumax-logo.svg',
+  './src/assets/yumax-simbolo.svg',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-maskable-512.png',
