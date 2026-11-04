@@ -355,6 +355,7 @@
     showNewInvestmentModal: false,
     mobileNavOpen: false,
     showSyncChoice: null,
+    supPeriod: 'ALL',
 
     // Cola de Sincronización Móvil Offline (Simulador)
     syncQueue: [],
@@ -1138,6 +1139,7 @@
 
   // RENDERIZADO PRINCIPAL
   function render() {
+    try { if (state.showNewSaleModal) syncSaleHeader(); if (state.showNewPurchaseModal) syncPurchaseHeader(); } catch (e) { /* noop */ }
     const appEl = document.getElementById('app');
     if (!appEl) return;
 
@@ -1355,6 +1357,7 @@
         (p.name || '').toLowerCase().includes(state.inventorySearch.toLowerCase()) ||
         (p.sku || '').toLowerCase().includes(state.inventorySearch.toLowerCase()) ||
         (p.material || '').toLowerCase().includes(state.inventorySearch.toLowerCase()) ||
+        (p.color || '').toLowerCase().includes(state.inventorySearch.toLowerCase()) ||
         (p.stone_type || '').toLowerCase().includes(state.inventorySearch.toLowerCase());
       const matchCat = state.inventoryCategory === 'ALL' || p.category === state.inventoryCategory;
       const matchLoc = state.inventoryLocation === 'ALL' || (p.location || '').includes(state.inventoryLocation);
@@ -1504,7 +1507,7 @@
                     </td>
                     <td>
                       <span class="badge ${p.material.includes('Oro') ? 'badge-gold' : 'badge-emerald'}">
-                        ${p.material} ${p.metal_purity}
+                        ${p.material} ${p.metal_purity}${p.color ? ' · ' + escapeHtml(p.color) : ''}
                       </span>
                     </td>
                     <td style="font-weight: 600; font-family: monospace;">
@@ -1713,6 +1716,8 @@
           </div>
         </div>
 
+        ${renderSupplierAnalysis()}
+
         <!-- TABLA DE LOTES CONSOLIDADOS DE COMPRA -->
         <div class="card" style="padding: 0; overflow: hidden;">
           <div style="padding: 1rem 1.25rem; border-bottom: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center;">
@@ -1750,7 +1755,8 @@
                       ${p.purchase_number || p.id}
                     </td>
                     <td>
-                      <div style="font-weight: 600; color: var(--text-primary);">${p.supplier}</div>
+                      <div style="font-weight: 600; color: var(--text-primary);">${escapeHtml(p.supplier)}</div>
+                      ${(p.supplier_phone || (findSupplierByName(p.supplier) || {}).phone) ? `<div style="font-size: 0.72rem; color: var(--text-secondary);">📞 ${escapeHtml(p.supplier_phone || findSupplierByName(p.supplier).phone)}</div>` : ''}
                       ${p.notes ? `<div style="font-size: 0.75rem; color: var(--text-muted);">${p.notes}</div>` : ''}
                     </td>
                     <td style="font-size: 0.8rem; color: var(--text-secondary);">${p.date}</td>
@@ -2822,6 +2828,325 @@
     `;
   }
 
+  // FECHA DE LA OPERACIÓN (compras y ventas)
+  function validateOpDate(key) {
+    if (!key || !/^\d{4}-\d{2}-\d{2}$/.test(key)) return 'Selecciona la fecha de la operación.';
+    if (key > todayKey()) return 'La fecha no puede ser posterior a hoy.';
+    return '';
+  }
+  function stampForDate(key) {
+    // Hoy: hora actual. Otro día: misma hora actual sobre ese día (conserva el orden de registro)
+    return key === todayKey() ? nowLocalStamp() : key + ' ' + nowLocalStamp().slice(11);
+  }
+  function displayDateFor(key, stamp) {
+    return key === todayKey() ? 'Hoy, ' + stamp.slice(11) : formatDateKeyES(key);
+  }
+  function addDaysKey(key, days) {
+    const d = new Date(key + 'T12:00:00');
+    d.setDate(d.getDate() + days);
+    return dateKey(d);
+  }
+
+  // PROVEEDORES
+  function normName(v) {
+    return String(v || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+  function findSupplierByName(name) {
+    const k = normName(name);
+    return k ? state.suppliers.find(x => normName(x.name) === k) : null;
+  }
+  function phoneDigits(v) { return String(v || '').replace(/\D/g, ''); }
+
+  // Conserva lo escrito en los encabezados de venta/compra cuando la pantalla se redibuja
+  function syncSaleHeader() {
+    const g = id => document.getElementById(id);
+    if (g('sale_customer')) state.saleForm.customer = g('sale_customer').value;
+    if (g('sale_phone')) state.saleForm.phone = g('sale_phone').value;
+    if (g('sale_method')) state.saleForm.method = g('sale_method').value;
+    if (g('sale_date')) state.saleForm.date = g('sale_date').value;
+  }
+  function syncPurchaseHeader() {
+    const g = id => document.getElementById(id);
+    if (g('pur_supplier')) state.purchaseForm.supplier = g('pur_supplier').value;
+    if (g('pur_phone')) state.purchaseForm.phone = g('pur_phone').value;
+    if (g('pur_invoice')) state.purchaseForm.invoice = g('pur_invoice').value;
+    if (g('pur_account')) state.purchaseForm.accountId = g('pur_account').value;
+    if (g('pur_date')) state.purchaseForm.date = g('pur_date').value;
+  }
+
+  // ANÁLISIS DE PROVEEDORES
+  const SUP_PERIODS = [['ALL', 'Todo'], ['YEAR', 'Este año'], ['90D', 'Últimos 90 días']];
+  function supplierRange() {
+    const t = todayKey();
+    if (state.supPeriod === 'YEAR') return { from: t.slice(0, 4) + '-01-01', to: t };
+    if (state.supPeriod === '90D') return { from: addDaysKey(t, -89), to: t };
+    return null;
+  }
+  function calculateSupplierStats() {
+    const range = supplierRange();
+    const map = {};
+    let grandTotal = 0;
+    (state.purchases || []).forEach(pu => {
+      const k = getRecordDateKey(pu);
+      if (range && !inRange(k, range)) return;
+      const key = normName(pu.supplier) || '(sin proveedor)';
+      const rec = findSupplierByName(pu.supplier);
+      if (!map[key]) map[key] = { key, name: rec ? rec.name : (pu.supplier || '(sin proveedor)'), phone: rec ? rec.phone : (pu.supplier_phone || ''), count: 0, total: 0, pieces: 0, grams: 0, costWithWeight: 0, saleValue: 0, costWithSale: 0, last: '', byMat: {} };
+      const r = map[key];
+      r.count += 1;
+      r.total += Number(pu.total) || 0;
+      grandTotal += Number(pu.total) || 0;
+      if (k && k > r.last) r.last = k;
+      (pu.items || []).forEach(it => {
+        const qty = Number(it.quantity) || 0;
+        const sub = Number(it.subtotal) || 0;
+        const prod = state.products.find(x => x.id === it.product_id);
+        const np = it.new_product || {};
+        const w = Number(np.weight || (prod && prod.weight_grams)) || 0;
+        const mat = np.material || (prod && prod.material) || 'Sin material';
+        const pur = np.purity || (prod && prod.metal_purity) || '';
+        const price = Number(it.sale_price || (prod && prod.sale_price)) || 0;
+        r.pieces += qty;
+        if (w > 0) {
+          r.grams += w * qty;
+          r.costWithWeight += sub;
+          const mk = (mat + ' ' + pur).trim();
+          if (!r.byMat[mk]) r.byMat[mk] = { grams: 0, cost: 0 };
+          r.byMat[mk].grams += w * qty;
+          r.byMat[mk].cost += sub;
+        }
+        if (price > 0) { r.saleValue += price * qty; r.costWithSale += sub; }
+      });
+    });
+    const rows = Object.values(map).map(r => Object.assign(r, {
+      avg: r.count ? r.total / r.count : 0,
+      cpg: r.grams > 0 ? r.costWithWeight / r.grams : null,
+      markup: r.costWithSale > 0 ? (r.saleValue - r.costWithSale) / r.costWithSale * 100 : null,
+      share: grandTotal > 0 ? r.total / grandTotal * 100 : 0,
+    })).sort((a, b) => b.total - a.total);
+    // Comparativo de costo por gramo dentro del mismo material y ley
+    const matMap = {};
+    rows.forEach(r => Object.keys(r.byMat).forEach(mk => {
+      const m = r.byMat[mk];
+      if (!matMap[mk]) matMap[mk] = [];
+      matMap[mk].push({ supplier: r.name, grams: m.grams, cost: m.cost, cpg: m.cost / m.grams });
+    }));
+    const comparisons = Object.keys(matMap).sort().map(mk => {
+      const list = matMap[mk].sort((a, b) => a.cpg - b.cpg);
+      const best = list[0].cpg;
+      return { material: mk, list: list.map(x => Object.assign(x, { diff: best > 0 ? (x.cpg - best) / best * 100 : 0 })) };
+    });
+    return { rows, comparisons, grandTotal };
+  }
+
+  function renderSupplierAnalysis() {
+    const st = calculateSupplierStats();
+    const r1 = 'text-align: right; font-family: monospace; white-space: nowrap;';
+    return `
+      <div class="card" style="padding: 0; overflow: hidden;">
+        <div style="padding: 1rem 1.25rem; border-bottom: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+          <div>
+            <div style="font-weight: 700; color: var(--gold-light); font-size: 1rem; font-family: var(--font-serif);">📊 Análisis de proveedores</div>
+            <div style="font-size: 0.78rem; color: var(--text-secondary);">Cuánto le compramos a cada proveedor y quién nos da mejor precio.</div>
+          </div>
+          <div style="display: flex; gap: 0.4rem; flex-wrap: wrap;">
+            ${SUP_PERIODS.map(([id, label]) => `<button class="${(state.supPeriod || 'ALL') === id ? 'btn-gold' : 'btn-secondary'}" style="font-size: 0.75rem; padding: 0.35rem 0.7rem;" onclick="window.yumax.setSupPeriod('${id}')">${label}</button>`).join('')}
+          </div>
+        </div>
+        ${st.rows.length === 0 ? `
+          <div style="padding: 2rem; text-align: center; color: var(--text-muted);">Aún no hay compras en este periodo.</div>
+        ` : `
+        <div style="overflow-x: auto;">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Proveedor</th>
+                <th style="text-align: right;">Compras</th>
+                <th style="text-align: right;">Total comprado</th>
+                <th style="text-align: right;">% del total</th>
+                <th style="text-align: right;">Compra promedio</th>
+                <th style="text-align: right;">Piezas</th>
+                <th style="text-align: right;">Gramos</th>
+                <th style="text-align: right;">Costo por gramo</th>
+                <th style="text-align: right;">Margen potencial</th>
+                <th>Última compra</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${st.rows.map((r, i) => `
+                <tr>
+                  <td>
+                    <div style="font-weight: 600; color: var(--text-primary);">${escapeHtml(r.name)} ${i === 0 && st.rows.length > 1 ? '<span class="badge badge-gold" style="font-size: 0.62rem; margin-left: 0.3rem;">Mayor volumen</span>' : ''}</div>
+                    <div style="font-size: 0.75rem; color: var(--text-secondary);">📞 ${r.phone ? escapeHtml(r.phone) : '<span style="color: var(--warning-primary);">sin teléfono</span>'}
+                      <button class="btn-secondary" style="padding: 0.05rem 0.4rem; font-size: 0.68rem; min-height: 0; margin-left: 0.3rem;" onclick="window.yumax.editSupplierPhone('${escapeHtml(r.name).replace(/'/g, '&#39;')}')">Editar</button>
+                    </div>
+                  </td>
+                  <td style="${r1}">${r.count}</td>
+                  <td style="${r1} font-weight: 700; color: var(--gold-light);">${formatCOP(r.total)}</td>
+                  <td style="${r1}">${r.share.toFixed(1)}%</td>
+                  <td style="${r1}">${formatCOP(Math.round(r.avg))}</td>
+                  <td style="${r1}">${r.pieces}</td>
+                  <td style="${r1}">${r.grams > 0 ? r.grams.toLocaleString('es-CO', { maximumFractionDigits: 2 }) + ' g' : '—'}</td>
+                  <td style="${r1}">${r.cpg != null ? formatCOP(Math.round(r.cpg)) + '/g' : '—'}</td>
+                  <td style="${r1} color: ${r.markup == null ? 'var(--text-muted)' : (r.markup >= 0 ? 'var(--emerald-light)' : 'var(--danger-primary)')};">${r.markup != null ? r.markup.toFixed(1) + '%' : '—'}</td>
+                  <td style="white-space: nowrap; font-size: 0.82rem;">${r.last ? formatDateKeyES(r.last) : '—'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        ${st.comparisons.length ? `
+          <div style="padding: 1rem 1.25rem 0.5rem; border-top: 1px solid var(--border-subtle);">
+            <div style="font-weight: 700; color: var(--text-primary); font-size: 0.9rem;">⚖️ ¿Quién nos vende mejor? Costo por gramo en el mismo material y ley</div>
+            <div style="font-size: 0.75rem; color: var(--text-secondary);">Solo se comparan proveedores dentro del mismo material y pureza, para que la comparación sea justa.</div>
+          </div>
+          <div style="overflow-x: auto;">
+            <table class="data-table">
+              <thead><tr><th>Material y ley</th><th>Proveedor</th><th style="text-align: right;">Gramos comprados</th><th style="text-align: right;">Costo total</th><th style="text-align: right;">Costo por gramo</th><th style="text-align: right;">Frente al mejor</th></tr></thead>
+              <tbody>
+                ${st.comparisons.map(c => c.list.map((x, i) => `
+                  <tr>
+                    <td style="font-weight: 600;">${i === 0 ? escapeHtml(c.material) : ''}</td>
+                    <td>${escapeHtml(x.supplier)} ${i === 0 && c.list.length > 1 ? '<span class="badge badge-emerald" style="font-size: 0.62rem; margin-left: 0.3rem;">Mejor precio</span>' : ''}</td>
+                    <td style="${r1}">${x.grams.toLocaleString('es-CO', { maximumFractionDigits: 2 })} g</td>
+                    <td style="${r1}">${formatCOP(x.cost)}</td>
+                    <td style="${r1} font-weight: 700;">${formatCOP(Math.round(x.cpg))}/g</td>
+                    <td style="${r1} color: ${i === 0 ? 'var(--emerald-light)' : 'var(--danger-primary)'};">${i === 0 ? (c.list.length > 1 ? 'Mejor' : 'Único proveedor') : '+' + x.diff.toFixed(1) + '%'}</td>
+                  </tr>
+                `).join('')).join('')}
+              </tbody>
+            </table>
+          </div>
+        ` : ''}
+        <div style="padding: 0.6rem 1.25rem; font-size: 0.72rem; color: var(--text-muted); border-top: 1px solid var(--border-subtle);">
+          Margen potencial = (precio de venta − costo de compra) ÷ costo de compra, con el precio de venta actual de cada joya. El costo por gramo usa el peso registrado de cada joya.
+        </div>
+        `}
+      </div>
+    `;
+  }
+
+  // CAMPOS DE JOYA COMPARTIDOS (Inventario inicial y Compras de joyas nuevas)
+  const JEWELRY_CATEGORIES = [
+    ['Anillos', 'Anillos & Compromiso'], ['Cadenas', 'Cadenas'], ['Pulseras', 'Pulseras'],
+    ['Aretes', 'Aretes & Topos'], ['Dijes', 'Dijes & Cruces'], ['Relojes', 'Relojes'],
+    ['Piedras Preciosas', 'Gemas / Esmeraldas'],
+  ];
+  const JEWELRY_COLORS = ['Amarillo', 'Blanco', 'Rosa', 'Dos tonos', 'Tricolor', 'Plateado', 'Negro', 'Otro'];
+  const JEWELRY_MATERIALS = ['Oro Amarillo', 'Oro Blanco', 'Oro Rosa', 'Oro Italiano', 'Plata', 'Platino', 'Acero'];
+  const JEWELRY_PURITIES = [['18k (750)', '18k (750)'], ['14k (585)', '14k (585)'], ['24k (999)', '24k (Puro)'], ['Ley 925', 'Ley 925'], ['Ley 950', 'Ley 950'], ['316L', '316L (Acero)']];
+  const JEWELRY_LOCATIONS = ['Vitrina 1 - Alta Joyería', 'Vitrina 2 - Plata', 'Vitrina 3 - Dijes', 'Caja Fuerte - Gaveta 1', 'Caja Fuerte - Gaveta 2', 'Taller de Orfebrería'];
+
+  function suggestSku() {
+    let sku;
+    do { sku = 'YUM-' + Math.floor(1000 + Math.random() * 9000); }
+    while (state.products.some(x => (x.sku || '').toUpperCase() === sku) ||
+           ((state.purchaseForm && state.purchaseForm.items) || []).some(it => (it.sku || '').toUpperCase() === sku));
+    return sku;
+  }
+
+  function productFieldsHtml(prefix) {
+    const lbl = 'display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;';
+    const opts = arr => arr.map(o => Array.isArray(o) ? `<option value="${o[0]}">${o[1]}</option>` : `<option value="${o}">${o}</option>`).join('');
+    return `
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+        <div>
+          <label style="${lbl}">SKU / Código único *</label>
+          <input type="text" id="${prefix}_sku" class="form-input" value="${suggestSku()}" required />
+        </div>
+        <div>
+          <label style="${lbl}">Categoría de la joya *</label>
+          <select id="${prefix}_category" class="form-input">${opts(JEWELRY_CATEGORIES)}</select>
+        </div>
+      </div>
+      <div style="margin-bottom: 1rem;">
+        <label style="${lbl}">Nombre de la joya *</label>
+        <input type="text" id="${prefix}_name" class="form-input" placeholder="ej. Cadena Eslabón Cubano 50cm" />
+      </div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+        <div>
+          <label style="${lbl}">Color *</label>
+          <select id="${prefix}_color" class="form-input">${opts(JEWELRY_COLORS)}</select>
+        </div>
+        <div>
+          <label style="${lbl}">Material *</label>
+          <select id="${prefix}_material" class="form-input">${opts(JEWELRY_MATERIALS)}</select>
+        </div>
+        <div>
+          <label style="${lbl}">Ley / Pureza *</label>
+          <select id="${prefix}_purity" class="form-input">${opts(JEWELRY_PURITIES)}</select>
+        </div>
+        <div>
+          <label style="${lbl}">Peso (g) *</label>
+          <input type="number" id="${prefix}_weight" class="form-input" step="0.0001" min="0" placeholder="ej. 4.2500" />
+        </div>
+      </div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+        <div>
+          <label style="${lbl}">Piedra / Gema principal</label>
+          <input type="text" id="${prefix}_stone" class="form-input" placeholder="ej. Diamante 0.50ct, Ninguna" />
+        </div>
+        <div>
+          <label style="${lbl}">Talla / Medida</label>
+          <input type="text" id="${prefix}_size" class="form-input" placeholder="ej. 6.5, 50cm" />
+        </div>
+        <div>
+          <label style="${lbl}">Ubicación física *</label>
+          <select id="${prefix}_location" class="form-input">${opts(JEWELRY_LOCATIONS)}</select>
+        </div>
+      </div>
+    `;
+  }
+
+  // Lee y valida los campos de joya. Devuelve { ok, error, data }
+  function readProductFields(prefix) {
+    const v = id => { const el = document.getElementById(prefix + '_' + id); return el ? String(el.value).trim() : ''; };
+    const data = {
+      sku: v('sku').toUpperCase(),
+      category: v('category'),
+      name: v('name'),
+      color: v('color'),
+      material: v('material'),
+      purity: v('purity'),
+      weight: parseFloat(v('weight')),
+      stone: v('stone') || 'Sin Piedra',
+      size: v('size') || 'Estándar',
+      location: v('location'),
+    };
+    if (!data.sku) return { ok: false, error: 'Escribe el SKU o código de la joya.' };
+    if (state.products.some(x => (x.sku || '').toUpperCase() === data.sku)) return { ok: false, error: `El SKU ${data.sku} ya existe en el catálogo. Si es la misma joya, usa "Reabastecer joya existente".` };
+    if (!data.name) return { ok: false, error: 'Escribe el nombre de la joya.' };
+    if (isNaN(data.weight) || data.weight <= 0) return { ok: false, error: 'Escribe el peso de la joya en gramos (mayor que 0).' };
+    return { ok: true, data };
+  }
+
+  function buildProduct(id, f, cost, price) {
+    return {
+      id,
+      sku: f.sku,
+      barcode: '770' + Math.floor(1000000000 + Math.random() * 9000000000),
+      qr_code: 'YUMAX-' + f.sku,
+      name: f.name,
+      description: `${f.name} en ${f.material} color ${f.color.toLowerCase()} (${f.purity}) con peso de ${f.weight}g.`,
+      category: f.category,
+      jewelry_type: f.category,
+      color: f.color,
+      material: f.material,
+      metal_purity: f.purity,
+      weight_grams: f.weight,
+      stone_type: f.stone,
+      size: f.size,
+      current_cost: cost,
+      average_cost: cost,
+      sale_price: price,
+      stock: 0,
+      stock_base: 0,
+      min_stock_alert: 1,
+      location: f.location,
+      status: 'ACTIVE',
+    };
+  }
+
   // MODALES
   function renderModals() {
     let html = '';
@@ -2839,72 +3164,11 @@
               <button class="btn-secondary" style="padding: 0.25rem 0.5rem;" onclick="window.yumax.closeModals()">✕</button>
             </div>
 
+            <div style="background: var(--gold-gradient-subtle); border: 1px solid var(--border-gold); border-radius: 10px; padding: 0.7rem 0.9rem; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 1rem;">
+              Usa este formulario para el <strong style="color: var(--text-primary);">inventario inicial</strong> (joyas que ya tenías antes de usar la app). Las joyas que compres a un proveedor regístralas en <strong style="color: var(--text-primary);">Compras → Joya nueva</strong>, así se descuenta el pago de la cuenta y queda la factura.
+            </div>
             <form onsubmit="window.yumax.submitNewProduct(event)">
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
-                <div>
-                  <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">SKU Único *</label>
-                  <input type="text" id="new_sku" class="form-input" placeholder="ej. YUM-AN-ORO-001" value="YUM-${Date.now().toString().slice(-4)}" required />
-                </div>
-                <div>
-                  <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">Categoría *</label>
-                  <select id="new_category" class="form-input">
-                    <option value="Anillos">Anillos & Compromiso</option>
-                    <option value="Cadenas">Cadenas</option>
-                    <option value="Pulseras">Pulseras</option>
-                    <option value="Aretes">Aretes & Topos</option>
-                    <option value="Dijes">Dijes & Cruces</option>
-                    <option value="Relojes">Relojes</option>
-                    <option value="Piedras Preciosas">Gemas / Esmeraldas</option>
-                  </select>
-                </div>
-              </div>
-
-              <div style="margin-bottom: 1rem;">
-                <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">Nombre de la Joya *</label>
-                <input type="text" id="new_name" class="form-input" placeholder="ej. Anillo Solitario Oro Amarillo con Diamante 0.50ct" required />
-              </div>
-
-              <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
-                <div>
-                  <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">Material *</label>
-                  <select id="new_material" class="form-input">
-                    <option value="Oro Amarillo">Oro Amarillo</option>
-                    <option value="Oro Blanco">Oro Blanco</option>
-                    <option value="Oro Rosa">Oro Rosa</option>
-                    <option value="Oro Italiano">Oro Italiano</option>
-                    <option value="Plata">Plata</option>
-                    <option value="Platino">Platino</option>
-                    <option value="Acero">Acero</option>
-                  </select>
-                </div>
-                <div>
-                  <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">Ley / Pureza *</label>
-                  <select id="new_purity" class="form-input">
-                    <option value="18k (750)">18k (750)</option>
-                    <option value="14k (585)">14k (585)</option>
-                    <option value="24k (999)">24k (Puro)</option>
-                    <option value="Ley 925">Ley 925</option>
-                    <option value="Ley 950">Ley 950</option>
-                    <option value="316L">316L (Acero)</option>
-                  </select>
-                </div>
-                <div>
-                  <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">Peso Exacto (g) *</label>
-                  <input type="number" id="new_weight" class="form-input" step="0.0001" placeholder="ej. 4.2500" required />
-                </div>
-              </div>
-
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
-                <div>
-                  <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">Piedra / Gema Principal</label>
-                  <input type="text" id="new_stone" class="form-input" placeholder="ej. Diamante 0.50ct, Esmeralda Muzo, Ninguna" />
-                </div>
-                <div>
-                  <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">Talla / Medida</label>
-                  <input type="text" id="new_size" class="form-input" placeholder="ej. 6.5, 50cm, 19cm" />
-                </div>
-              </div>
-
+              ${productFieldsHtml('new')}
               <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
                 <div>
                   <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">Costo Compra COP *</label>
@@ -2920,21 +3184,10 @@
                 </div>
               </div>
 
-              <div style="margin-bottom: 1.5rem;">
-                <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">Ubicación Física *</label>
-                <select id="new_location" class="form-input">
-                  <option value="Vitrina 1 - Alta Joyería">Vitrina 1 - Alta Joyería</option>
-                  <option value="Vitrina 2 - Plata">Vitrina 2 - Plata</option>
-                  <option value="Vitrina 3 - Dijes">Vitrina 3 - Dijes</option>
-                  <option value="Caja Fuerte - Gaveta 1">Caja Fuerte - Gaveta 1</option>
-                  <option value="Caja Fuerte - Gaveta 2">Caja Fuerte - Gaveta 2</option>
-                  <option value="Taller de Orfebrería">Taller de Orfebrería</option>
-                </select>
-              </div>
 
               <div style="display: flex; justify-content: flex-end; gap: 0.75rem;">
                 <button type="button" class="btn-secondary" onclick="window.yumax.closeModals()">Cancelar</button>
-                <button type="submit" class="btn-gold">Guardar Joya en Catálogo</button>
+                <button type="submit" class="btn-gold">Guardar en Inventario Inicial</button>
               </div>
             </form>
           </div>
@@ -2972,7 +3225,7 @@
                 ${state.customers.map(c => `<option value="${c.name}">${c.phone ? 'Tel: ' + c.phone : ''}</option>`).join('')}
               </datalist>
 
-              <div style="display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 1rem; margin-bottom: 1.25rem;">
+              <div style="display: grid; grid-template-columns: 1.4fr 1fr 1fr 0.9fr; gap: 1rem; margin-bottom: 1.25rem;">
                 <div>
                   <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">
                     Cliente (Seleccionar o escribir nuevo) *
@@ -2997,6 +3250,12 @@
                     <option value="CARD" ${state.saleForm.method === 'CARD' ? 'selected' : ''}>💳 Datáfono / Tarjeta</option>
                     <option value="CREDIT" ${state.saleForm.method === 'CREDIT' ? 'selected' : ''}>📝 Crédito / Separado</option>
                   </select>
+                </div>
+                <div>
+                  <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">
+                    Fecha de la venta *
+                  </label>
+                  <input type="date" id="sale_date" class="form-input" value="${state.saleForm.date || todayKey()}" max="${todayKey()}" required />
                 </div>
               </div>
 
@@ -3156,26 +3415,30 @@
             <form onsubmit="window.yumax.submitPurchase(event)">
               <!-- PASO 1: DATOS DEL PROVEEDOR Y CUENTA DE PAGO -->
               <datalist id="supplier_suggestions">
-                ${state.suppliers.map(s => `<option value="${s.name}">${s.category ? 'Categoría: ' + s.category : ''}</option>`).join('')}
+                ${state.suppliers.map(s => `<option value="${escapeHtml(s.name)}">${s.phone ? '📞 ' + escapeHtml(s.phone) : ''}</option>`).join('')}
               </datalist>
 
-              <div style="display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 1rem; margin-bottom: 1.25rem;">
+              <div style="display: grid; grid-template-columns: 1.4fr 1fr 0.9fr; gap: 1rem; margin-bottom: 1rem;">
                 <div>
-                  <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">
-                    Proveedor / Orfebre *
-                  </label>
-                  <input type="text" id="pur_supplier" list="supplier_suggestions" class="form-input" placeholder="Nombre del proveedor u orfebre" value="${state.purchaseForm.supplier || ''}" required />
+                  <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">Proveedor / Orfebre *</label>
+                  <input type="text" id="pur_supplier" list="supplier_suggestions" class="form-input" placeholder="Nombre del proveedor u orfebre" value="${escapeHtml(state.purchaseForm.supplier || '')}" oninput="window.yumax.onPurchaseSupplierInput(this.value)" required />
                 </div>
                 <div>
-                  <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">
-                    No. Factura / Remisión
-                  </label>
-                  <input type="text" id="pur_invoice" class="form-input" placeholder="ej. FAC-1002" value="${state.purchaseForm.invoice || ''}" />
+                  <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">Teléfono del proveedor *</label>
+                  <input type="tel" id="pur_phone" class="form-input" placeholder="ej. 300 123 4567" value="${escapeHtml(state.purchaseForm.phone || '')}" required />
                 </div>
                 <div>
-                  <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">
-                    Cuenta de Tesorería de Pago *
-                  </label>
+                  <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">Fecha de la compra *</label>
+                  <input type="date" id="pur_date" class="form-input" value="${state.purchaseForm.date || todayKey()}" max="${todayKey()}" required />
+                </div>
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.25rem;">
+                <div>
+                  <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">No. Factura / Remisión</label>
+                  <input type="text" id="pur_invoice" class="form-input" placeholder="ej. FAC-1002" value="${escapeHtml(state.purchaseForm.invoice || '')}" />
+                </div>
+                <div>
+                  <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">Cuenta de Tesorería de Pago *</label>
                   <select id="pur_account" class="form-input">
                     ${state.accounts.map(a => `<option value="${a.id}" ${state.purchaseForm.accountId === a.id ? 'selected' : ''}>${a.icon} ${a.name} (${formatCOP(a.balance)})</option>`).join('')}
                   </select>
@@ -3184,9 +3447,36 @@
 
               <!-- PASO 2: AGREGAR JOYAS AL LOTE DE COMPRA -->
               <div class="item-picker-box">
+                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.9rem;">
+                  <button type="button" class="${state.purchaseForm.mode !== 'NEW' ? 'btn-gold' : 'btn-secondary'}" style="font-size: 0.8rem; padding: 0.45rem 0.9rem;" onclick="window.yumax.setPurchaseMode('EXISTING')">🔁 Reabastecer joya existente</button>
+                  <button type="button" class="${state.purchaseForm.mode === 'NEW' ? 'btn-gold' : 'btn-secondary'}" style="font-size: 0.8rem; padding: 0.45rem 0.9rem;" onclick="window.yumax.setPurchaseMode('NEW')">✨ Joya nueva (no está en el catálogo)</button>
+                </div>
+                ${state.purchaseForm.mode === 'NEW' ? `
+                  <div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.9rem;">
+                    Completa los datos de la joya nueva. Se creará en el catálogo con esta compra como su primera entrada en el Kardex.
+                  </div>
+                  ${productFieldsHtml('pnew')}
+                  <div style="display: grid; grid-template-columns: 0.8fr 1.2fr 1.2fr auto; gap: 0.75rem; align-items: end;">
+                    <div>
+                      <label style="display: block; font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.25rem;">Cantidad *</label>
+                      <input type="number" id="pnew_qty" class="form-input" value="1" min="1" />
+                    </div>
+                    <div>
+                      <label style="display: block; font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.25rem;">Precio de compra unit. COP *</label>
+                      <input type="number" id="pnew_cost" class="form-input" min="0" placeholder="ej. 1500000" />
+                    </div>
+                    <div>
+                      <label style="display: block; font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.25rem;">Precio de venta COP *</label>
+                      <input type="number" id="pnew_price" class="form-input" min="0" placeholder="ej. 2800000" />
+                    </div>
+                    <div>
+                      <button type="button" class="btn-gold" style="white-space: nowrap; height: 38px; padding: 0 1rem;" onclick="window.yumax.addNewPurchaseItem()">+ Agregar joya nueva</button>
+                    </div>
+                  </div>
+                ` : `
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
                   <div style="font-size: 0.85rem; font-weight: 700; color: var(--gold-light);">
-                    💎 Agregar Joya al Lote de Compra
+                    💎 Reabastecer joya del catálogo
                   </div>
                   <div id="pur_picker_info" style="font-size: 0.75rem; color: var(--text-secondary);">
                     ${state.purchaseForm.pickerProductId ? (() => {
@@ -3222,6 +3512,7 @@
                     </button>
                   </div>
                 </div>
+                `}
               </div>
 
               <!-- PASO 3: TABLA DEL LOTE DE COMPRA -->
@@ -3256,8 +3547,10 @@
                         ${state.purchaseForm.items.map((it, idx) => `
                           <tr>
                             <td>
-                              <span class="badge badge-gold" style="font-family: monospace; font-size: 0.7rem; margin-right: 0.4rem;">${it.sku}</span>
-                              <span style="font-weight: 600; font-size: 0.85rem;">${it.name}</span>
+                              <span class="badge badge-gold" style="font-family: monospace; font-size: 0.7rem; margin-right: 0.4rem;">${escapeHtml(it.sku)}</span>
+                              ${it.is_new ? '<span class="badge badge-emerald" style="font-size: 0.65rem; margin-right: 0.4rem;">NUEVA</span>' : ''}
+                              <span style="font-weight: 600; font-size: 0.85rem;">${escapeHtml(it.name)}</span>
+                              ${it.is_new && it.new_product ? `<div style="font-size: 0.72rem; color: var(--text-secondary); margin-top: 0.2rem;">${escapeHtml(it.new_product.category)} · ${escapeHtml(it.new_product.color)} · ${escapeHtml(it.new_product.material)} ${escapeHtml(it.new_product.purity)} · ${it.new_product.weight} g · Venta ${formatCOP(it.sale_price)}</div>` : ''}
                             </td>
                             <td style="text-align: center; font-weight: 700; font-family: monospace; color: var(--emerald-light);">
                               +${it.quantity}
@@ -3289,7 +3582,7 @@
                 <div>
                   <div style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">Resumen del Lote</div>
                   <div style="font-size: 0.95rem; font-weight: 700; color: var(--text-primary);">
-                    ${purPieces} piezas en total (${(state.purchaseForm.items || []).length} joyas a reabastecer)
+                    ${purPieces} piezas en total (${(() => { const its = state.purchaseForm.items || []; const nu = its.filter(x => x.is_new).length; const re = its.length - nu; return [nu ? nu + (nu === 1 ? ' joya nueva' : ' joyas nuevas') : '', re ? re + (re === 1 ? ' reabastecida' : ' reabastecidas') : ''].filter(Boolean).join(', ') || 'sin joyas'; })()})
                   </div>
                 </div>
                 <div style="text-align: right;">
@@ -3469,7 +3762,7 @@
 
             <div style="background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 1rem; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;">
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
-                <div><span style="color: var(--text-secondary);">Proveedor / Orfebre:</span> <strong>${pur.supplier}</strong></div>
+                <div><span style="color: var(--text-secondary);">Proveedor / Orfebre:</span> <strong>${escapeHtml(pur.supplier)}</strong>${pur.supplier_phone ? ` · 📞 ${escapeHtml(pur.supplier_phone)}` : ''}</div>
                 <div><span style="color: var(--text-secondary);">Cuenta de Pago:</span> <strong>${pur.account_name || 'Tesorería General'}</strong></div>
                 <div><span style="color: var(--text-secondary);">Fecha de Adquisición:</span> <span>${pur.date}</span></div>
                 <div><span style="color: var(--text-secondary);">Registrado Por:</span> <span>${pur.user}</span></div>
@@ -3986,6 +4279,7 @@
         customer: '',
         phone: '',
         method: 'CASH',
+        date: todayKey(),
         notes: '',
         items: [],
         pickerProductId: firstAvailable ? firstAvailable.id : '',
@@ -4007,6 +4301,9 @@
         pickerProductId: firstProd ? firstProd.id : '',
         pickerQty: 1,
         pickerCost: firstProd ? (firstProd.current_cost || firstProd.average_cost) : 0,
+        mode: firstProd ? 'EXISTING' : 'NEW',
+        phone: '',
+        date: todayKey(),
       };
       state.showNewPurchaseModal = true;
       render();
@@ -4232,45 +4529,18 @@
 
     submitNewProduct(e) {
       e.preventDefault();
-      const sku = document.getElementById('new_sku').value.toUpperCase().trim();
-      const name = document.getElementById('new_name').value.trim();
-      const category = document.getElementById('new_category').value;
-      const material = document.getElementById('new_material').value.trim();
-      const purity = document.getElementById('new_purity').value.trim();
-      const weight = parseFloat(document.getElementById('new_weight').value);
-      const stone = document.getElementById('new_stone').value.trim() || 'Sin Piedra';
-      const size = document.getElementById('new_size').value.trim() || 'Estándar';
+      const r = readProductFields('new');
+      if (!r.ok) { alert(r.error); return; }
+      const f = r.data;
+      const sku = f.sku;
       const cost = parseFloat(document.getElementById('new_cost').value);
       const price = parseFloat(document.getElementById('new_price').value);
       const stock = parseInt(document.getElementById('new_stock').value, 10);
-      const location = document.getElementById('new_location').value.trim();
+      if (isNaN(cost) || cost < 0 || isNaN(price) || price <= 0) { alert('Revisa el costo y el precio de venta.'); return; }
 
       const newId = newRecordId('PRD');
-      const barcode = '770' + Math.floor(1000000000 + Math.random() * 9000000000);
-      const qr_code = 'YUMAX-' + sku;
-
-      const product = {
-        id: newId,
-        sku,
-        barcode,
-        qr_code,
-        name,
-        description: `${name} en ${material} (${purity}) con peso de ${weight}g.`,
-        category,
-        jewelry_type: category,
-        material,
-        metal_purity: purity,
-        weight_grams: weight,
-        stone_type: stone,
-        size,
-        current_cost: cost,
-        average_cost: cost,
-        sale_price: price,
-        stock,
-        min_stock_alert: 1,
-        location,
-        status: 'ACTIVE',
-      };
+      const product = buildProduct(newId, f, cost, price);
+      product.stock = isNaN(stock) ? 0 : stock;
 
       state.products.unshift(product);
 
@@ -4422,6 +4692,12 @@
       const phone = (phoneEl ? phoneEl.value : state.saleForm.phone).trim();
       const method = methodEl ? methodEl.value : state.saleForm.method;
 
+      const saleDateEl = document.getElementById('sale_date');
+      const saleDateKey = saleDateEl ? saleDateEl.value : (state.saleForm.date || todayKey());
+      const saleDateErr = validateOpDate(saleDateKey);
+      if (saleDateErr) { alert(saleDateErr); return; }
+      const saleStamp = stampForDate(saleDateKey);
+
       if (!customer) {
         alert('Por favor ingresa o selecciona el nombre del cliente.');
         return;
@@ -4459,7 +4735,7 @@
           unit_cost: prod.average_cost,
           total_cost: prod.average_cost * it.quantity,
           stock_after: prod.stock,
-          date: nowLocalStamp(),
+          date: saleStamp,
           user: state.activeUser.email,
           notes: `Venta comprobante ${invoiceNumber} a ${customer} (${it.sku} x${it.quantity})`,
         });
@@ -4471,8 +4747,8 @@
         invoice: invoiceNumber,
         customer,
         phone: phone || 'No registrado',
-        date: 'Hoy, ' + nowLocalStamp().slice(11),
-        full_date: nowLocalStamp(),
+        date: displayDateFor(saleDateKey, saleStamp),
+        full_date: saleStamp,
         method,
         total,
         items: JSON.parse(JSON.stringify(state.saleForm.items)),
@@ -4491,12 +4767,12 @@
           total,
           paid: 0,
           balance: total,
-          dueDate: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+          dueDate: addDaysKey(saleDateKey, 30),
           status: 'ACTIVE',
         });
       } else {
         const targetAcc = state.accounts.find(a => a.type === method) || state.accounts[0];
-        postCash(targetAcc.id, total, 'VENTA', invoiceNumber, `Venta a ${customer}`);
+        postCash(targetAcc.id, total, 'VENTA', invoiceNumber, `Venta a ${customer}`, { date: saleStamp });
       }
 
       // 4. Actualizar o registrar Cliente en la base de datos
@@ -4514,6 +4790,7 @@
         });
       }
 
+      try { sortCollections(); } catch (e2) { /* noop */ }
       persistState();
       state.showNewSaleModal = false;
       state.saleForm.items = [];
@@ -4550,6 +4827,87 @@
         if (qtyInput) qtyInput.value = 1;
         if (infoEl) infoEl.innerHTML = `Stock actual: <strong>${p.stock} un</strong> • CPP actual: <strong>${formatCOP(p.average_cost)}</strong>`;
       }
+    },
+
+    onPurchaseSupplierInput(value) {
+      state.purchaseForm.supplier = value;
+      const rec = findSupplierByName(value);
+      const phoneEl = document.getElementById('pur_phone');
+      if (rec && rec.phone && phoneEl && (!phoneEl.value || phoneEl.dataset.auto === '1')) {
+        phoneEl.value = rec.phone;
+        phoneEl.dataset.auto = '1';
+        state.purchaseForm.phone = rec.phone;
+      }
+    },
+
+    setSupPeriod(periodId) {
+      state.supPeriod = periodId;
+      render();
+    },
+
+    editSupplierPhone(name) {
+      let rec = findSupplierByName(name);
+      const val = prompt(`Teléfono de ${name}:`, rec && rec.phone ? rec.phone : '');
+      if (val === null) return;
+      if (phoneDigits(val).length < 7) { alert('El teléfono debe tener al menos 7 dígitos.'); return; }
+      if (!rec) {
+        rec = { id: newRecordId('SUP'), name, phone: val.trim(), contact: 'Contacto Directo', category: 'Insumos / Joyería' };
+        state.suppliers.push(rec);
+      } else {
+        rec.phone = val.trim();
+      }
+      persistState();
+      render();
+    },
+
+    setPurchaseMode(mode) {
+      const supEl = document.getElementById('pur_supplier');
+      const invEl = document.getElementById('pur_invoice');
+      const accEl = document.getElementById('pur_account');
+      if (supEl) state.purchaseForm.supplier = supEl.value;
+      if (invEl) state.purchaseForm.invoice = invEl.value;
+      if (accEl) state.purchaseForm.accountId = accEl.value;
+      state.purchaseForm.mode = mode;
+      render();
+    },
+
+    addNewPurchaseItem() {
+      const supEl = document.getElementById('pur_supplier');
+      const invEl = document.getElementById('pur_invoice');
+      const accEl = document.getElementById('pur_account');
+      if (supEl) state.purchaseForm.supplier = supEl.value;
+      if (invEl) state.purchaseForm.invoice = invEl.value;
+      if (accEl) state.purchaseForm.accountId = accEl.value;
+
+      const r = readProductFields('pnew');
+      if (!r.ok) { alert(r.error); return; }
+      const f = r.data;
+      if (state.purchaseForm.items.some(it => (it.sku || '').toUpperCase() === f.sku)) {
+        alert(`El SKU ${f.sku} ya está en este lote. Cambia el código o ajusta la cantidad.`);
+        return;
+      }
+      const qty = parseInt(document.getElementById('pnew_qty').value, 10);
+      const cost = parseFloat(document.getElementById('pnew_cost').value);
+      const price = parseFloat(document.getElementById('pnew_price').value);
+      if (isNaN(qty) || qty < 1) { alert('La cantidad debe ser al menos 1.'); return; }
+      if (isNaN(cost) || cost < 0) { alert('Escribe el precio de compra por unidad.'); return; }
+      if (isNaN(price) || price <= 0) { alert('Escribe el precio de venta.'); return; }
+      if (price < cost && !confirm(`El precio de venta (${formatCOP(price)}) es menor que el precio de compra (${formatCOP(cost)}). ¿Continuar?`)) return;
+
+      state.purchaseForm.items.push({
+        is_new: true,
+        product_id: newRecordId('PRD'),
+        sku: f.sku,
+        name: f.name,
+        category: f.category,
+        quantity: qty,
+        unit_cost: cost,
+        subtotal: qty * cost,
+        projected_cpp: cost,
+        sale_price: price,
+        new_product: f,
+      });
+      render();
     },
 
     addPurchaseItem() {
@@ -4638,6 +4996,19 @@
         alert('Por favor ingresa o selecciona el proveedor / orfebre.');
         return;
       }
+      const phoneEl = document.getElementById('pur_phone');
+      const supplierPhone = (phoneEl ? phoneEl.value : (state.purchaseForm.phone || '')).trim();
+      if (phoneDigits(supplierPhone).length < 7) {
+        alert('Escribe el teléfono del proveedor (mínimo 7 dígitos). Queda guardado en su ficha para las próximas compras.');
+        return;
+      }
+      const purDateEl = document.getElementById('pur_date');
+      const purDateKey = purDateEl ? purDateEl.value : (state.purchaseForm.date || todayKey());
+      const purDateErr = validateOpDate(purDateKey);
+      if (purDateErr) { alert(purDateErr); return; }
+      const purStamp = stampForDate(purDateKey);
+      const supRec = findSupplierByName(supplier);
+      const supplierName = supRec ? supRec.name : supplier;
 
       if (!state.purchaseForm.items || state.purchaseForm.items.length === 0) {
         alert('Debes agregar al menos una joya al lote de compra.');
@@ -4646,6 +5017,19 @@
 
       const acc = state.accounts.find(a => a.id === accountId) || state.accounts[0];
       const totalPurchase = state.purchaseForm.items.reduce((acc, it) => acc + it.subtotal, 0);
+
+      // 0. Crear en el catálogo las joyas nuevas de este lote
+      for (const it of state.purchaseForm.items.filter(x => x.is_new)) {
+        if (state.products.some(x => x.id !== it.product_id && (x.sku || '').toUpperCase() === (it.sku || '').toUpperCase())) {
+          alert(`El SKU ${it.sku} ya existe en el catálogo. Quita esa joya del lote y agrégala de nuevo con otro código.`);
+          return;
+        }
+      }
+      state.purchaseForm.items.filter(x => x.is_new).forEach(it => {
+        if (!state.products.some(x => x.id === it.product_id)) {
+          state.products.unshift(buildProduct(it.product_id, it.new_product, it.unit_cost, it.sale_price));
+        }
+      });
 
       // 1. Recalcular CPP, actualizar stock y registrar Kardex por cada producto comprado
       state.purchaseForm.items.forEach(it => {
@@ -4667,27 +5051,28 @@
           product_id: prod.id,
           product_sku: prod.sku,
           type: 'PURCHASE',
-          type_label: 'Compra Mercancía',
+          type_label: it.is_new ? 'Compra Joya Nueva' : 'Compra Mercancía',
           quantity: it.quantity,
           unit_cost: it.unit_cost,
           total_cost: it.subtotal,
           stock_after: newStock,
-          date: nowLocalStamp(),
+          date: purStamp,
           user: state.activeUser.email,
-          notes: `Compra ${invoice} a ${supplier} - Joya: ${prod.sku} (x${it.quantity}) Nuevo CPP: ${formatCOP(newAvgCost)}`,
+          notes: `Compra ${invoice} a ${supplierName} - Joya: ${prod.sku} (x${it.quantity}) Nuevo CPP: ${formatCOP(newAvgCost)}`,
         });
       });
 
       // 2. Descontar total de la cuenta de tesorería
-      postCash(acc.id, -totalPurchase, 'COMPRA', invoice, `Compra a ${supplier}`);
+      postCash(acc.id, -totalPurchase, 'COMPRA', invoice, `Compra a ${supplierName}`, { date: purStamp });
 
       // 3. Registrar Compra Consolidada
       const newPurchase = {
         id: newRecordId('PUR'),
         purchase_number: invoice,
-        supplier,
-        date: 'Hoy, ' + nowLocalStamp().slice(11),
-        full_date: nowLocalStamp(),
+        supplier: supplierName,
+        supplier_phone: supplierPhone,
+        date: displayDateFor(purDateKey, purStamp),
+        full_date: purStamp,
         account_id: acc.id,
         account_name: acc.name,
         total: totalPurchase,
@@ -4697,17 +5082,22 @@
       state.purchases.unshift(newPurchase);
 
       // 4. Actualizar o registrar Proveedor en catálogo
-      let supObj = state.suppliers.find(s => s.name.toLowerCase() === supplier.toLowerCase());
+      let supObj = findSupplierByName(supplier);
       if (!supObj) {
-        state.suppliers.push({
+        supObj = {
           id: newRecordId('SUP'),
-          name: supplier,
-          phone: '',
+          name: supplierName,
+          phone: supplierPhone,
           contact: 'Contacto Directo',
           category: 'Insumos / Joyería',
-        });
+        };
+        state.suppliers.push(supObj);
+      } else if (supObj.phone !== supplierPhone) {
+        supObj.phone = supplierPhone;
       }
+      newPurchase.supplier_id = supObj.id;
 
+      try { sortCollections(); } catch (e2) { /* noop */ }
       persistState();
       state.showNewPurchaseModal = false;
       state.purchaseForm.items = [];
